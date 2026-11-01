@@ -1,11 +1,24 @@
-import type { Platform } from "./types";
+import type { Platform, SwingPlatform } from "./types";
 
-export const ARENA_WIDTH = 1280;
+export const ARENA_WIDTH = 1600;
 export const ARENA_HEIGHT = 720;
 
 export interface SpawnPoint {
   x: number;
   y: number;
+}
+
+export interface ArenaPalette {
+  backgroundTop: string;
+  backgroundBottom: string;
+  blockA: string;
+  blockB: string;
+  blockEdge: string;
+  blockStrokeA: string;
+  blockStrokeB: string;
+  pillar: string;
+  pillarShade: string;
+  shadow: string;
 }
 
 export interface ArenaDefinition {
@@ -14,6 +27,8 @@ export interface ArenaDefinition {
   width: number;
   height: number;
   platforms: Platform[];
+  palette: ArenaPalette;
+  swings?: SwingPlatform[];
   spawns: {
     player: SpawnPoint;
     bot: SpawnPoint;
@@ -21,13 +36,37 @@ export interface ArenaDefinition {
   };
 }
 
+/** Current collision rect of a swing platform given its angle and bob. */
+export function swingRect(
+  def: SwingPlatform,
+  angle: number,
+  bob = 0,
+  index?: number,
+): Platform {
+  const cx = def.anchorX + def.length * Math.sin(angle);
+  const cy = def.anchorY + def.length * Math.cos(angle) + bob;
+  return {
+    x: cx - def.w / 2,
+    y: cy - def.h / 2,
+    w: def.w,
+    h: def.h,
+    kind: "block",
+    ...(index !== undefined ? { swingIndex: index } : {}),
+  };
+}
+
 /**
- * Both arenas follow the reference layout: a tall dense central structure
- * (stepped pyramid with a crenellated castle peak), segmented side floors
- * with deadly pits (voids) between them, elevated side platforms and tall
- * side towers. The bottom is open — anyone who falls into a pit drops out
- * of the arena and dies. Fighters (radius 20) are small relative to the map,
- * matching the ROUNDS-style proportion of the reference demo.
+ * Two distinct 1600×720 arenas. Fighters (radius 16) are small relative to
+ * the wide map so 2–4 players have room. Each arena carries its own palette
+ * (background + platform colors) so the two maps read differently.
+ *
+ * Proving Grounds follows the reference demo's teal arena: a central stepped
+ * pyramid with a crenellated castle peak, symmetric stepped side platforms,
+ * two tall H-notched side towers, and a segmented floor with deadly pits.
+ *
+ * Skyline is a darker, lower arena: two symmetric stepped tower clusters on
+ * either side of a wide central pit, rust/red platforms, no central structure.
+ * Falling into any pit drops the player out of the arena and kills them.
  */
 
 const mirrors = (platforms: Platform[]): Platform[] =>
@@ -39,36 +78,62 @@ const mirrors = (platforms: Platform[]): Platform[] =>
 // Walls + ceiling only. The bottom is open; the floor is segmented blocks
 // with gaps (pits) so players can fall out and die.
 const FRAME: Platform[] = [
-  { x: 0, y: 0, w: 24, h: 720, kind: "frame" },
-  { x: 1256, y: 0, w: 24, h: 720, kind: "frame" },
-  { x: 0, y: 0, w: 1280, h: 24, kind: "frame" },
+  { x: 0, y: 0, w: 20, h: 720, kind: "frame" },
+  { x: 1580, y: 0, w: 20, h: 720, kind: "frame" },
+  { x: 0, y: 0, w: 1600, h: 20, kind: "frame" },
 ];
 
-// --- Proving Grounds: crenellated castle on a stepped pyramid. ---
+// --- Proving Grounds: teal arena, tan platforms, crenellated central pyramid.
+
+const PG_PALETTE: ArenaPalette = {
+  backgroundTop: "#1a4a5a",
+  backgroundBottom: "#07131f",
+  blockA: "#c9b9a1",
+  blockB: "#8c7f6e",
+  blockEdge: "rgba(255,244,225,.55)",
+  blockStrokeA: "rgba(255,244,225,.16)",
+  blockStrokeB: "rgba(58,48,34,.18)",
+  pillar: "#101820",
+  pillarShade: "rgba(0,0,0,.34)",
+  shadow: "rgba(4,20,28,.22)",
+};
 
 const PG_FLOOR: Platform[] = [
-  { x: 0, y: 690, w: 300, h: 30, kind: "block" }, // left floor
-  { x: 420, y: 690, w: 440, h: 30, kind: "block" }, // center floor
-  { x: 980, y: 690, w: 300, h: 30, kind: "block" }, // right floor
-]; // pits: x300-420 and x860-980
+  { x: 20, y: 688, w: 520, h: 32, kind: "block" }, // left floor 20-540
+  { x: 600, y: 688, w: 400, h: 32, kind: "block" }, // center floor 600-1000
+  { x: 1060, y: 688, w: 520, h: 32, kind: "block" }, // right floor 1060-1580
+]; // pits: x540-600 and x1000-1060
 
+// A long continuous walkway in front of the pyramid (the reference map's wide
+// beam near the bottom). It reads as a thin bridge; the pits behind still catch
+// a careless step off its ends.
+const PG_BEAM: Platform[] = [
+  { x: 140, y: 600, w: 1320, h: 20, kind: "block" },
+];
+
+// Solid stepped pyramid: a dark body with tan walkable tier tops and a
+// crenellated crown, matching the reference map's dominant central mass. The
+// body sits within the centre floor (600-1000) so the flanking pits stay clear.
 const PG_CENTER: Platform[] = [
-  { x: 590, y: 150, w: 100, h: 34, kind: "block" }, // crown center
-  { x: 510, y: 180, w: 80, h: 40, kind: "block" }, // crown left
-  { x: 690, y: 180, w: 80, h: 40, kind: "block" }, // crown right
-  { x: 530, y: 220, w: 220, h: 32, kind: "block" }, // castle base
-  { x: 622, y: 252, w: 36, h: 88, kind: "pillar" }, // neck (climbable)
-  { x: 500, y: 340, w: 280, h: 34, kind: "block" }, // upper tier
-  { x: 440, y: 460, w: 400, h: 40, kind: "block" }, // mid tier
-  { x: 420, y: 600, w: 440, h: 90, kind: "block" }, // base (reaches center floor)
+  { x: 620, y: 460, w: 360, h: 228, kind: "pillar" }, // body base (460-688)
+  { x: 680, y: 340, w: 240, h: 120, kind: "pillar" }, // body mid (340-460)
+  { x: 720, y: 240, w: 160, h: 100, kind: "pillar" }, // body upper (240-340)
+  { x: 620, y: 438, w: 360, h: 22, kind: "block" }, // tier 1 walk (top 438)
+  { x: 680, y: 318, w: 240, h: 22, kind: "block" }, // tier 2 walk (top 318)
+  { x: 720, y: 218, w: 160, h: 22, kind: "block" }, // tier 3 walk (top 218)
+  { x: 730, y: 150, w: 140, h: 24, kind: "block" }, // crown base (top 150)
+  { x: 736, y: 92, w: 44, h: 42, kind: "block" }, // crown tooth left
+  { x: 820, y: 92, w: 44, h: 42, kind: "block" }, // crown tooth right
+  { x: 736, y: 134, w: 128, h: 16, kind: "block" }, // crown connector
 ];
 
 const PG_LEFT: Platform[] = [
-  { x: 160, y: 480, w: 160, h: 34, kind: "block" }, // left mid (overhangs pit)
-  { x: 200, y: 350, w: 130, h: 30, kind: "block" }, // left upper
-  { x: 30, y: 420, w: 70, h: 270, kind: "block" }, // left tower
-  { x: 30, y: 340, w: 70, h: 40, kind: "block" }, // left tower cap
-  { x: 100, y: 600, w: 90, h: 28, kind: "block" }, // left ledge
+  { x: 330, y: 520, w: 100, h: 24, kind: "block" }, // slope step low (top 520, above the beam lane)
+  { x: 450, y: 470, w: 110, h: 24, kind: "block" }, // slope step high (top 470)
+  { x: 30, y: 260, w: 64, h: 428, kind: "block" }, // tower column (bottom 688)
+  { x: 30, y: 190, w: 30, h: 70, kind: "block" }, // tower prong L
+  { x: 64, y: 190, w: 30, h: 70, kind: "block" }, // tower prong R
+  { x: 30, y: 260, w: 64, h: 22, kind: "block" }, // tower notch connector
 ];
 
 export const PROVING_GROUNDS: ArenaDefinition = {
@@ -76,41 +141,73 @@ export const PROVING_GROUNDS: ArenaDefinition = {
   name: "Proving Grounds",
   width: ARENA_WIDTH,
   height: ARENA_HEIGHT,
-  platforms: [...FRAME, ...PG_FLOOR, ...PG_CENTER, ...PG_LEFT, ...mirrors(PG_LEFT)],
+  platforms: [
+    ...FRAME,
+    ...PG_FLOOR,
+    ...PG_CENTER,
+    ...PG_LEFT,
+    ...mirrors(PG_LEFT),
+    ...PG_BEAM, // drawn last so the walkway sits in front of the pyramid
+  ],
+  palette: PG_PALETTE,
   spawns: {
-    player: { x: 240, y: 460 },
-    bot: { x: 1040, y: 460 },
+    player: { x: 260, y: 584 },
+    bot: { x: 1340, y: 584 },
     bots: [
-      { x: 1040, y: 460 },
-      { x: 640, y: 320 },
-      { x: 1170, y: 360 },
-      { x: 520, y: 440 },
+      { x: 1340, y: 584 },
+      { x: 800, y: 202 }, // on tier 3 (top 218)
+      { x: 520, y: 584 },
+      { x: 1080, y: 584 },
     ],
   },
 };
 
-// --- Skyline: central spire on a wide base, stepped side ledges. ---
+// --- Skyline: darker arena, rust/red platforms, two tower clusters + central pit.
+
+const SKY_PALETTE: ArenaPalette = {
+  backgroundTop: "#12333c",
+  backgroundBottom: "#06141a",
+  blockA: "#b98d5e",
+  blockB: "#7a5533",
+  blockEdge: "rgba(255,230,200,.5)",
+  blockStrokeA: "rgba(255,230,200,.14)",
+  blockStrokeB: "rgba(74,42,18,.2)",
+  pillar: "#241610",
+  pillarShade: "rgba(0,0,0,.4)",
+  shadow: "rgba(2,10,14,.25)",
+};
 
 const SKY_FLOOR: Platform[] = [
-  { x: 0, y: 690, w: 320, h: 30, kind: "block" }, // left floor
-  { x: 400, y: 690, w: 480, h: 30, kind: "block" }, // center floor
-  { x: 960, y: 690, w: 320, h: 30, kind: "block" }, // right floor
-]; // pits: x320-400 and x880-960
+  { x: 20, y: 688, w: 680, h: 32, kind: "block" }, // left floor 20-700
+  { x: 900, y: 688, w: 680, h: 32, kind: "block" }, // right floor 900-1580
+]; // central pit: x700-900 (narrower than before)
 
+// Central crane tower: a tall mast with a fixed top plate, a rope-hung platform
+// that swings (see `swing.ts`), and two lower beams. Sits in the central pit so
+// players must cross on the hanging platform or the side scaffolds.
 const SKY_CENTER: Platform[] = [
-  { x: 580, y: 150, w: 120, h: 26, kind: "block" }, // spire top
-  { x: 630, y: 170, w: 20, h: 150, kind: "pillar" }, // spire shaft
-  { x: 500, y: 320, w: 280, h: 30, kind: "block" }, // upper ledge
-  { x: 440, y: 460, w: 400, h: 36, kind: "block" }, // mid ledge
-  { x: 400, y: 600, w: 480, h: 90, kind: "block" }, // base (reaches center floor)
+  { x: 786, y: 200, w: 28, h: 488, kind: "pillar" }, // mast (top 200, bottom 688)
+  { x: 750, y: 180, w: 100, h: 26, kind: "block" }, // top plate (top 180)
+  { x: 740, y: 420, w: 120, h: 26, kind: "block" }, // mid beam (top 420)
+  { x: 740, y: 560, w: 120, h: 26, kind: "block" }, // lower beam (top 560)
 ];
 
-const SKY_LEFT: Platform[] = [
-  { x: 160, y: 520, w: 180, h: 34, kind: "block" }, // left wide mid
-  { x: 220, y: 380, w: 140, h: 30, kind: "block" }, // left upper
-  { x: 30, y: 460, w: 80, h: 230, kind: "block" }, // left tower
-  { x: 30, y: 360, w: 80, h: 50, kind: "block" }, // left tower cap
-  { x: 100, y: 600, w: 90, h: 28, kind: "block" }, // left ledge
+const SKY_SIDE: Platform[] = [
+  { x: 60, y: 280, w: 130, h: 26, kind: "block" }, // top platform (top 280)
+  { x: 110, y: 306, w: 26, h: 382, kind: "pillar" }, // tall post (bottom 688)
+  { x: 150, y: 340, w: 30, h: 26, kind: "block" }, // post bump
+  { x: 60, y: 440, w: 380, h: 26, kind: "block" }, // long mid beam (top 440)
+  { x: 390, y: 466, w: 24, h: 90, kind: "pillar" }, // post under mid beam
+  { x: 80, y: 570, w: 340, h: 26, kind: "block" }, // long low beam (top 570)
+  { x: 200, y: 500, w: 30, h: 44, kind: "block" }, // block on low beam
+];
+
+// Blocks held by strings from the ceiling; a standing player, a shot, or a
+// blast pushes them and they swing back under gravity (see `swing.ts`).
+const SKY_SWINGS: SwingPlatform[] = [
+  { id: "crane", anchorX: 800, anchorY: 20, length: 200, w: 110, h: 26 },
+  { id: "dangle-left", anchorX: 330, anchorY: 20, length: 330, w: 44, h: 44 },
+  { id: "dangle-right", anchorX: 1270, anchorY: 20, length: 330, w: 44, h: 44 },
 ];
 
 export const SKYLINE: ArenaDefinition = {
@@ -118,15 +215,23 @@ export const SKYLINE: ArenaDefinition = {
   name: "Skyline",
   width: ARENA_WIDTH,
   height: ARENA_HEIGHT,
-  platforms: [...FRAME, ...SKY_FLOOR, ...SKY_CENTER, ...SKY_LEFT, ...mirrors(SKY_LEFT)],
+  platforms: [
+    ...FRAME,
+    ...SKY_FLOOR,
+    ...SKY_CENTER,
+    ...SKY_SIDE,
+    ...mirrors(SKY_SIDE),
+  ],
+  palette: SKY_PALETTE,
+  swings: SKY_SWINGS,
   spawns: {
-    player: { x: 250, y: 500 },
-    bot: { x: 1030, y: 500 },
+    player: { x: 280, y: 554 }, // on the low beam (top 570), clear of the block at x200-230
+    bot: { x: 1380, y: 554 },
     bots: [
-      { x: 1030, y: 500 },
-      { x: 640, y: 440 },
-      { x: 1170, y: 380 },
-      { x: 520, y: 440 },
+      { x: 1380, y: 554 },
+      { x: 280, y: 424 }, // on the mid beam (top 440)
+      { x: 600, y: 672 }, // left floor
+      { x: 1000, y: 672 }, // right floor
     ],
   },
 };
@@ -141,5 +246,3 @@ export const ARENA_ORDER = [PROVING_GROUNDS.id, SKYLINE.id];
 export function getArena(id?: string): ArenaDefinition {
   return (id && ARENAS[id]) || PROVING_GROUNDS;
 }
-
-export const ACTIVE_ARENA = PROVING_GROUNDS;

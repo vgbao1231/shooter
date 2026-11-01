@@ -7,6 +7,10 @@ interface CardOverlayProps {
   onPick: (cardId: CardId) => void;
   onReroll: () => void;
   onClose: () => void;
+  /** "sandbox" (training/gauntlet, reroll + close) or "loser" (LAN 1v1 pick). */
+  mode?: "sandbox" | "loser";
+  /** Loser-mode countdown in seconds (shown as the auto-pick timer). */
+  secondsLeft?: number;
 }
 
 export function CardOverlay({
@@ -15,14 +19,23 @@ export function CardOverlay({
   onPick,
   onReroll,
   onClose,
+  mode = "sandbox",
+  secondsLeft = 0,
 }: CardOverlayProps) {
+  const loser = mode === "loser";
   return (
     <div className="card-overlay" role="dialog" aria-modal="true" aria-label="Choose an upgrade card">
       <div className="card-overlay__box">
         <div className="card-overlay__heading">
-          <span className="eyebrow">Sandbox upgrade</span>
-          <h2>Choose one card</h2>
-          <p>Cards stay for the rest of the session. In a real 1v1, only the loser picks.</p>
+          <span className="eyebrow">{loser ? "Round lost" : "Sandbox upgrade"}</span>
+          <h2>{loser ? "Pick your comeback card" : "Choose one card"}</h2>
+          <p>
+            {loser
+              ? secondsLeft > 0
+                ? `Auto-picks in ${secondsLeft}s.`
+                : "The first card is auto-picked on timeout."
+              : "Cards stay for the rest of the session. In a real 1v1, only the loser picks."}
+          </p>
         </div>
 
         {offers.length > 0 ? (
@@ -63,15 +76,15 @@ export function CardOverlay({
         )}
 
         <div className="card-overlay__actions">
-          <button className="ghost-button" onClick={onReroll} disabled={offers.length === 0}>
+          <button className="ghost-button" onClick={onReroll} disabled={offers.length === 0 || loser}>
             Reroll
           </button>
-          <button className="ghost-button" onClick={onClose}>
+          <button className="ghost-button" onClick={onClose} disabled={loser}>
             Close · Esc
           </button>
         </div>
 
-        {owned.length > 0 ? (
+        {!loser && owned.length > 0 ? (
           <div className="owned-cards">
             <span>Equipped</span>
             {owned.map((cardId) => {

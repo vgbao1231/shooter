@@ -1,7 +1,8 @@
 import { ARENA_HEIGHT } from "./arena";
-import { FIXED_DT, ROUND_END_DELAY } from "./constants";
+import { CARD_PICK_TIMEOUT, FIXED_DT, ROUND_END_DELAY } from "./constants";
 import { CARD_CATALOG } from "./content";
 import {
+  checkRoundOver,
   fireWeapon,
   incrementGrenadeTimers,
   killFallen,
@@ -12,6 +13,7 @@ import {
 import { updateEffects } from "./effects";
 import { movePlayer, stepPlayerPhysics } from "./physics";
 import { nextRandom } from "./rng";
+import { stepSwingPlatforms } from "./swing";
 import { resetSandbox, startMatchRound } from "./world";
 import type { CardId, CardSpec, InputFrame, PlayerState, World } from "./types";
 
@@ -93,19 +95,32 @@ export function stepWorld(
     if (input) applyInput(world, player, input, dt);
   }
 
+  // Moving (swinging) platforms update before collision so players and shots
+  // collide with their current positions this tick.
+  stepSwingPlatforms(world, dt);
+
   for (const player of world.players) {
     if (player.alive) stepPlayerPhysics(world, player, dt);
   }
 
-  // Anyone who falls out of the arena (into a pit) dies.
+  // Anyone who falls out of the arena (into a pit) dies. Defer the round check
+  // until every fallen player is resolved, so a simultaneous team wipe in the
+  // pit is a draw rather than a win for whoever was processed last.
+  let anyFell = false;
   for (const player of world.players) {
     if (player.alive && player.y > ARENA_HEIGHT + 60) {
-      killFallen(world, player);
+      killFallen(world, player, false);
+      anyFell = true;
     }
   }
+  if (anyFell) checkRoundOver(world);
 
   updateBullets(world, dt);
   updateGrenades(world, dt);
+  // Bullet kills defer their round check (a shot may wipe several players, or
+  // several shots may land in one tick); resolve them all now so the round
+  // ends on a normal bullet kill and a simultaneous wipe stays a draw.
+  checkRoundOver(world);
   updateEffects(world, dt);
 
   for (const player of world.players) {
@@ -116,27 +131,100 @@ export function stepWorld(
   world.tick += 1;
 }
 
-/** Advance a finished match round: banner → next round or match end. */
+/** Advance a finished match round: banner → (loser card pick) → next round or match end. */
 function stepMatchRoundOver(world: World, dt: number): void {
   if (world.roundState === "playing") {
     world.roundState = "roundEnd";
     world.roundTimer = ROUND_END_DELAY;
+    maybeStartCardPick(world);
     return;
   }
   if (world.roundState !== "roundEnd") return;
+  // A pending loser card pick freezes the round-end banner until the loser
+  // chooses (or the timer auto-picks the first offer).
+  if (world.cardPick) {
+    world.cardPick.timer = Math.max(0, world.cardPick.timer - dt);
+    if (world.cardPick.timer <= 0) {
+      const loser = getPlayerById(world, world.cardPick.playerId);
+      if (loser) applyCard(world, loser, world.cardPick.offers[0] as CardId);
+      world.cardPick = null;
+    }
+    return;
+  }
   world.roundTimer = Math.max(0, world.roundTimer - dt);
   if (world.roundTimer > 0) return;
   const winner =
     world.winnerId !== null
       ? world.players.find((player) => player.id === world.winnerId)
       : null;
-  if (winner && winner.score >= world.matchTarget) {
+  // Team mode: a team wins when its round count reaches the target.
+  if (world.teamCount > 1 && world.winnerId !== null) {
+    const winnerPlayer = world.players.find((player) => player.id === world.winnerId);
+    const winningTeam = winnerPlayer?.team ?? 0;
+    const teamScore = world.teamScores[winningTeam] ?? 0;
+    if (teamScore >= world.matchTarget) {
+      world.roundState = "matchEnd";
+      world.matchOver = true;
+      return;
+    }
+  } else if (winner && winner.score >= world.matchTarget) {
     world.roundState = "matchEnd";
     world.matchOver = true;
     return;
   }
   world.roundNumber += 1;
   startMatchRound(world);
+}
+
+function getPlayerById(world: World, id: number): PlayerState | undefined {
+  return world.players.find((player) => player.id === id);
+}
+
+/**
+ * After a scored round, the loser picks 1 of 3 cards — but only in a true 1v1
+ * (exactly two players, one per team). Winner gets nothing, a draw offers no
+ * card, and a match-deciding round (target already reached) offers none either
+ * because there is no next round to use it in.
+ */
+function maybeStartCardPick(world: World): void {
+  if (world.mode !== "match" || world.matchOver) return;
+  if (world.teamCount !== 2 || world.players.length !== 2) return;
+  if (world.winnerId === null) return; // draw
+  const winner = getPlayerById(world, world.winnerId);
+  if (!winner) return;
+  // The match already ended on this round (winner reached the target): no pick.
+  const winningTeam = world.teamCount > 1 ? winner.team : -1;
+  if (winningTeam >= 0 && (world.teamScores[winningTeam] ?? 0) >= world.matchTarget) return;
+  if (winningTeam < 0 && winner.score >= world.matchTarget) return;
+  const loser = world.players.find((player) => player.id !== winner.id);
+  if (!loser) return;
+  const offers = getCardOffers(world, loser, 3);
+  if (offers.length === 0) return;
+  if (loser.isBot) {
+    // A bot can't choose; take a deterministic pseudo-random offer so the
+    // rubber-band still applies but the round isn't held up.
+    const next = nextRandom(world.fxState);
+    world.fxState = next.state;
+    applyCard(world, loser, offers[Math.floor(next.value * offers.length)]!.id);
+    return;
+  }
+  world.cardPick = {
+    playerId: loser.id,
+    offers: offers.map((card) => card.id),
+    timer: CARD_PICK_TIMEOUT,
+  };
+}
+
+/** Resolve the pending loser pick (from a client message). Returns true when
+ *  the pick was accepted and the round can resume. */
+export function pickCard(world: World, cardId: CardId): boolean {
+  if (!world.cardPick) return false;
+  if (!world.cardPick.offers.includes(cardId)) return false;
+  const loser = getPlayerById(world, world.cardPick.playerId);
+  if (!loser) return false;
+  applyCard(world, loser, cardId);
+  world.cardPick = null;
+  return true;
 }
 
 export function getCardOffers(
@@ -203,6 +291,7 @@ export function hashWorld(world: World): string {
         round(player.fireCooldown),
         round(player.grenadeCooldown),
         player.alive ? 1 : 0,
+        player.team,
         [...player.cards].sort().join(","),
       ].join(":"),
     );
@@ -213,6 +302,12 @@ export function hashWorld(world: World): string {
   for (const grenade of world.grenades) {
     feed(`g:${round(grenade.x)}:${round(grenade.y)}:${round(grenade.fuse)}`);
   }
+  for (const swing of world.swingState) {
+    feed(
+      `s:${round(swing.angle)}:${round(swing.angVel)}:${round(swing.bob)}:${round(swing.bobVel)}`,
+    );
+  }
+  feed(`teams:${world.teamCount}:${world.teamScores.join(",")}`);
   return hash.toString(16).padStart(8, "0");
 }
 

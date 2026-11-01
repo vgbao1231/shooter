@@ -40,7 +40,12 @@ export function createBotInput(
   difficulty: "easy" | "normal" | "hard" = "normal",
 ): InputFrame {
   const target = world.players
-    .filter((player) => player.alive && !player.isBot)
+    .filter(
+      (player) =>
+        player.alive &&
+        player.id !== bot.id &&
+        (world.teamCount > 1 ? player.team !== bot.team : true),
+    )
     .sort(
       (left, right) =>
         Math.hypot(left.x - bot.x, left.y - bot.y) -

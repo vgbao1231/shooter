@@ -8,8 +8,7 @@ page.on("console", (message) => {
 });
 page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 
-// Pointer lock is disabled for the automated run.
-await page.goto("http://127.0.0.1:5173/?noPointerLock=1", { waitUntil: "networkidle" });
+await page.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle" });
 await page.waitForTimeout(800);
 
 // --- Menu → start Training so the game canvas mounts.
@@ -18,30 +17,36 @@ await page.waitForTimeout(600);
 
 const box = await page.locator("canvas").boundingBox();
 if (!box) throw new Error("Canvas missing");
+// `object-fit: contain` letterboxes the wide map; mirror pointerToWorld so the
+// aim maps to the same world coordinates the game computes.
+const scale = Math.min(box.width / 1600, box.height / 720);
+const displayedW = 1600 * scale;
+const displayedH = 720 * scale;
+const offsetX = box.x + (box.width - displayedW) / 2;
+const offsetY = box.y + (box.height - displayedH) / 2;
 const point = (x, y) => ({
-  x: box.x + (x / 1280) * box.width,
-  y: box.y + (y / 720) * box.height,
+  x: offsetX + x * scale,
+  y: offsetY + y * scale,
 });
 
-// --- Fix positions in a clear lane so shots reach the bot.
+// --- Fix positions in a clear lane (right floor) so shots reach the bot.
 await page.evaluate(() => {
   const world = window.__INKSHOT__;
   if (!world) throw new Error("no debug world");
   world.botEnabled = false;
   const bot = world.players[1];
   const player = world.players[0];
-  // Stand on the central base platform so the shot lane is clear.
-  player.x = 480;
-  player.y = 580;
+  player.x = 1150;
+  player.y = 672;
   player.vx = 0;
   player.vy = 0;
-  bot.x = 650;
-  bot.y = 580;
+  bot.x = 1400;
+  bot.y = 672;
   bot.vx = 0;
   bot.vy = 0;
 });
 await page.locator("canvas").click();
-await page.mouse.move(point(650, 580).x, point(650, 580).y);
+await page.mouse.move(point(1400, 672).x, point(1400, 672).y);
 await page.mouse.down();
 const samples = [];
 for (let index = 0; index < 12; index += 1) {
@@ -93,7 +98,6 @@ const result = await page.evaluate(() => {
   const text = (selector) => document.querySelector(selector)?.textContent?.trim() ?? null;
   const world = window.__INKSHOT__;
   return {
-    // Vitality block removed; use the compact fighter bar instead.
     fighterHealth: text(".fighter-card--left .fighter-card__health"),
     botHealth: text(".fighter-card--right .fighter-card__meta"),
     simHealth: world?.players.map((player) => Math.round(player.health)) ?? null,
@@ -104,12 +108,23 @@ const result = await page.evaluate(() => {
   };
 });
 
-// --- Gauntlet smoke: menu → select Gauntlet mode → start.
+// --- Pause overlay via Esc (local mode).
+await page.keyboard.press("Escape");
+await page.waitForTimeout(300);
+const pauseShown = await page.locator(".pause-overlay").count();
+await page.screenshot({ path: "/tmp/opencode/inkshot-pause.png" });
+await page.getByRole("button", { name: /resume/i }).click();
+await page.waitForTimeout(200);
+
+// --- Gauntlet smoke: menu → Vượt ải → level select → level 1.
 await page.getByRole("button", { name: "Menu" }).click();
 await page.waitForTimeout(400);
-await page.getByRole("button", { name: /bot gauntlet/i }).click();
+await page.getByRole("button", { name: /vượt ải/i }).click();
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /start gauntlet/i }).click();
+await page.getByRole("button", { name: /choose a level/i }).click();
+await page.waitForTimeout(300);
+const levelCards = await page.locator(".level-card").count();
+await page.getByRole("button", { name: /ải 1/i }).click();
 await page.waitForTimeout(600);
 const gauntlet = await page.evaluate(() => {
   const world = window.__INKSHOT__;
@@ -123,100 +138,47 @@ const gauntlet = await page.evaluate(() => {
 });
 await page.screenshot({ path: "/tmp/opencode/inkshot-gauntlet.png" });
 
-// --- Match smoke: menu → Match → countdown→playing → round award → match end.
+// --- High-level gauntlet (level 6) should start 3 hard bots.
 await page.getByRole("button", { name: "Menu" }).click();
 await page.waitForTimeout(400);
-await page.getByRole("button", { name: /^match/i }).click();
+await page.getByRole("button", { name: /vượt ải/i }).click();
 await page.waitForTimeout(200);
-await page.getByRole("button", { name: /start match/i }).click();
+await page.getByRole("button", { name: /choose a level/i }).click();
 await page.waitForTimeout(300);
-
-// Countdown should be active right after start, then turn to playing.
-const countdown = await page.evaluate(() => window.__INKSHOT__?.roundState ?? null);
-await page.waitForFunction(
-  () => {
-    const world = window.__INKSHOT__;
-    return world?.roundState === "playing";
-  },
-  { timeout: 5000 },
-);
-
-// Drop the bot into the left pit (x300-420 has no floor) → falls → round award.
-await page.evaluate(() => {
-  const world = window.__INKSHOT__;
-  world.botEnabled = false;
-  world.matchTarget = 2; // reachable quickly for the smoke test
-  const bot = world.players[1];
-  bot.x = 360;
-  bot.y = 650;
-  bot.vx = 0;
-  bot.vy = 80;
-  bot.grounded = false;
-});
-// The roundEnd banner should render once the round resolves.
-await page.waitForFunction(
-  () => document.querySelector(".hud__result")?.textContent?.includes("takes it") ?? false,
-  { timeout: 5000 },
-);
-const roundAward = await page.evaluate(() => {
+await page.getByRole("button", { name: /ải 6/i }).click();
+await page.waitForTimeout(600);
+const gauntletHigh = await page.evaluate(() => {
   const world = window.__INKSHOT__;
   return {
-    roundOver: world.roundOver,
-    winnerId: world.winnerId,
-    playerScore: world.players[0].score,
-    roundState: world.roundState,
-    hudText: document.querySelector(".hud__result")?.textContent?.trim() ?? null,
+    worldMode: world?.mode ?? null,
+    arena: world?.arenaId ?? null,
+    bots: world?.players.filter((player) => player.isBot).length ?? null,
+    difficulty: world?.botDifficulty ?? null,
   };
 });
 
-// Wait for the next round countdown, then drop the bot again → match end.
-await page.waitForFunction(
-  () => {
-    const world = window.__INKSHOT__;
-    return world?.roundState === "playing" && world?.roundNumber === 2;
-  },
-  { timeout: 8000 },
-);
-await page.evaluate(() => {
-  const world = window.__INKSHOT__;
-  const bot = world.players[1];
-  bot.x = 360;
-  bot.y = 650;
-  bot.vx = 0;
-  bot.vy = 80;
-  bot.grounded = false;
-});
-// The match-end overlay should render once the match resolves.
-await page.waitForSelector(".gameover-overlay", { timeout: 8000 });
-const matchEnd = await page.evaluate(() => {
-  const world = window.__INKSHOT__;
-  return {
-    matchOver: world.matchOver,
-    roundState: world.roundState,
-    playerScore: world.players[0].score,
-    matchTarget: world.matchTarget,
-    overlay: document.querySelector(".gameover-overlay")?.textContent?.trim() ?? null,
-  };
-});
-await page.screenshot({ path: "/tmp/opencode/inkshot-match-end.png" });
-
-// Rematch resets scores and round number, back to countdown.
-await page.getByRole("button", { name: /rematch/i }).click();
+// --- Level-select preview renders a non-blank map for both arenas.
+await page.getByRole("button", { name: "Menu" }).click();
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: /vượt ải/i }).click();
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: /choose a level/i }).click();
 await page.waitForTimeout(300);
-const rematch = await page.evaluate(() => {
-  const world = window.__INKSHOT__;
-  return {
-    roundNumber: world.roundNumber,
-    roundState: world.roundState,
-    playerScore: world.players[0].score,
-    matchOver: world.matchOver,
-  };
-});
-await page.screenshot({ path: "/tmp/opencode/inkshot-rematch.png" });
+const previews = await page.evaluate(() =>
+  [...document.querySelectorAll(".level-card__preview")].map((canvas) => {
+    const context = canvas.getContext("2d");
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let colored = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index + 3] > 0) colored += 1;
+    }
+    return colored;
+  }),
+);
 
 console.log(
   JSON.stringify(
-    { errors, visibleCards, samples, duringFire, result, gauntlet, countdown, roundAward, matchEnd, rematch },
+    { errors, visibleCards, samples, duringFire, result, pauseShown, levelCards, gauntlet, gauntletHigh, previews },
     null,
     2,
   ),

@@ -34,6 +34,27 @@ export interface Platform {
   w: number;
   h: number;
   kind: PlatformKind;
+  /** Set on swing-platform rects so bullets can push the block they hit. */
+  swingIndex?: number;
+}
+
+export interface SwingPlatform {
+  id: string;
+  anchorX: number;
+  anchorY: number;
+  length: number;
+  w: number;
+  h: number;
+}
+
+export interface SwingState {
+  angle: number;
+  angVel: number;
+  /** Vertical bob displacement from the anchor (positive = down, negative = rope slack). */
+  bob: number;
+  bobVel: number;
+  /** Player ids currently head-bumping the block, to edge-trigger the kick (not serialized). */
+  headBumpers?: Set<number>;
 }
 
 export interface WeaponSpec {
@@ -112,6 +133,8 @@ export interface PlayerState {
   score: number;
   prevJumpHeld: boolean;
   prevGrenadeHeld: boolean;
+  /** 0-based team index; 0 is the only team in free-for-all (teamCount 1). */
+  team: number;
 }
 
 export interface Bullet {
@@ -195,6 +218,17 @@ export interface BotBrain {
   weaponTimer: number;
 }
 
+/** A pending "loser picks 1 of 3" offer, frozen into the world when a scored
+ *  1v1 round ends. While set, the round-end phase waits instead of advancing. */
+export interface CardPick {
+  /** The player (round loser) who must choose. */
+  playerId: number;
+  /** Deterministic offers (already filtered to cards the loser lacks). */
+  offers: CardId[];
+  /** Seconds left before the sim auto-picks `offers[0]`. */
+  timer: number;
+}
+
 export interface World {
   tick: number;
   time: number;
@@ -205,6 +239,10 @@ export interface World {
   arenaId: string;
   players: PlayerState[];
   platformList: Platform[];
+  staticPlatforms: Platform[];
+  swingDefs: SwingPlatform[];
+  swingState: SwingState[];
+  swingRects: Platform[];
   bullets: Bullet[];
   grenades: Grenade[];
   particles: Particle[];
@@ -225,6 +263,12 @@ export interface World {
   roundNumber: number;
   matchTarget: number;
   matchOver: boolean;
+  /** Number of teams (1 = free-for-all). When > 1, teammates don't damage each other. */
+  teamCount: number;
+  /** Round wins per team index (team mode). */
+  teamScores: number[];
+  /** Pending loser card pick; freezes the round-end phase while non-null. */
+  cardPick: CardPick | null;
 }
 
 export interface PlayerHud {
@@ -247,6 +291,8 @@ export interface PlayerHud {
   y: number;
   skin: string;
   score: number;
+  /** 0-based team index (0 in free-for-all). */
+  team: number;
 }
 
 export interface HudState {
@@ -267,4 +313,8 @@ export interface HudState {
   roundNumber: number;
   matchTarget: number;
   matchOver: boolean;
+  /** Number of teams (1 = free-for-all). */
+  teamCount: number;
+  /** Total score per team index, when teamCount > 1. */
+  teamScores: Record<number, number>;
 }

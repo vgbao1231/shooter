@@ -1,4 +1,5 @@
-import { getArena, type HudState, type PlayerHud } from "@inkshot/sim";
+import { getArena, TEAM_COLORS, type HudState, type PlayerHud } from "@inkshot/sim";
+import type { CSSProperties } from "react";
 
 function FighterCard({
   fighter,
@@ -41,18 +42,29 @@ function FighterCard({
 function MatchBanner({ hud }: { hud: HudState }) {
   const isMatch = hud.mode === "match";
   if (!isMatch) return null;
+  const teamLabel = (playerId: number | null): string | null => {
+    if (hud.teamCount <= 1 || playerId === null) return null;
+    const player = [hud.player, ...hud.bots].find((entry) => entry.id === playerId);
+    return player ? `Team ${player.team + 1}` : null;
+  };
 
   if (hud.matchOver) {
+    const team = teamLabel(hud.winnerId);
     const winnerName =
-      hud.winnerId !== null
+      team ??
+      (hud.winnerId !== null
         ? [hud.player, ...hud.bots].find((entry) => entry.id === hud.winnerId)?.name ??
           "Nobody"
-        : "Nobody";
+        : "Nobody");
+    const scoreLine =
+      hud.teamCount > 1
+        ? `Final ${Object.values(hud.teamScores).join(" – ")}`
+        : `Final ${hud.player.score} – ${hud.bot.score}`;
     return (
       <div className="hud__result">
         <span className="eyebrow">Match over</span>
         <strong>{winnerName} wins</strong>
-        <span>Final {hud.player.score} – {hud.bot.score}</span>
+        <span>{scoreLine}</span>
       </div>
     );
   }
@@ -68,19 +80,22 @@ function MatchBanner({ hud }: { hud: HudState }) {
   }
 
   if (hud.roundState === "roundEnd") {
-    const winnerId = hud.winnerId;
+    const team = teamLabel(hud.winnerId);
     const name =
-      winnerId === null
+      team ??
+      (hud.winnerId === null
         ? "DRAW"
-        : [hud.player, ...hud.bots].find((entry) => entry.id === winnerId)?.name ??
-          "DRAW";
+        : [hud.player, ...hud.bots].find((entry) => entry.id === hud.winnerId)?.name ??
+          "DRAW");
+    const scoreLine =
+      hud.teamCount > 1
+        ? `${Object.values(hud.teamScores).join(" – ")}`
+        : `${hud.player.score} – ${hud.bot.score}`;
     return (
       <div className="hud__result">
         <span className="eyebrow">Round {hud.roundNumber}</span>
         <strong>{name} takes it</strong>
-        <span>
-          {hud.player.score} – {hud.bot.score}
-        </span>
+        <span>{scoreLine}</span>
       </div>
     );
   }
@@ -101,6 +116,7 @@ export function Hud({
 }) {
   const { player } = hud;
   const isMatch = hud.mode === "match";
+  const isTeam = hud.teamCount > 1;
   const result =
     hud.winnerId === null
       ? "DRAW"
@@ -123,7 +139,9 @@ export function Hud({
     hud.mode === "gauntlet"
       ? `Coins ${coins}`
       : isMatch
-        ? `${player.score} – ${hud.bot.score}`
+        ? isTeam
+          ? Object.values(hud.teamScores).join(" – ")
+          : `${player.score} – ${hud.bot.score}`
         : "Sandbox · 1v1 bot";
 
   return (
@@ -133,8 +151,8 @@ export function Hud({
           fighter={player}
           align="left"
           label={isMatch ? "You" : "Player 01"}
-          score={isMatch ? player.score : undefined}
-          matchTarget={isMatch ? hud.matchTarget : undefined}
+          score={isMatch && !isTeam ? player.score : undefined}
+          matchTarget={isMatch && !isTeam ? hud.matchTarget : undefined}
         />
         <div className="hud__mode">
           <span className="eyebrow">Inkshot · {modeLine}</span>
@@ -145,10 +163,28 @@ export function Hud({
           fighter={hud.bot}
           align="right"
           label={isMatch ? "Bot squad" : hud.mode === "gauntlet" ? "Bot squad" : "Training bot"}
-          score={isMatch ? hud.bot.score : undefined}
-          matchTarget={isMatch ? hud.matchTarget : undefined}
+          score={isMatch && !isTeam ? hud.bot.score : undefined}
+          matchTarget={isMatch && !isTeam ? hud.matchTarget : undefined}
         />
       </div>
+
+      {isTeam && isMatch ? (
+        <div className="hud__teams">
+          {Array.from({ length: hud.teamCount }, (_, team) => {
+            const color = TEAM_COLORS[team] ?? "#fff";
+            return (
+              <div
+                key={team}
+                className="hud__team"
+                style={{ "--team-color": color } as CSSProperties}
+              >
+                <span className="hud__team-name">T{team + 1}</span>
+                <span className="hud__team-score">{hud.teamScores[team] ?? 0}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="hud__controls">
         <span>A/D move</span>

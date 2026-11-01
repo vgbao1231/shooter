@@ -12,6 +12,7 @@ import { WEAPONS } from "./content";
 import { burst, spawnDamageText, spawnImpact, spawnMuzzle } from "./effects";
 import { circleVsAabb, raycastPlatforms } from "./geometry";
 import { nextRandom } from "./rng";
+import { explosionImpulseSwing, impulseSwing } from "./swing";
 import { grenadeCooldownFor } from "./world";
 import type { Bullet, Grenade, PlayerState, World } from "./types";
 
@@ -19,6 +20,36 @@ function simRandom(world: World): number {
   const next = nextRandom(world.rngState);
   world.rngState = next.state;
   return next.value;
+}
+
+/**
+ * Whether two players are on the same team in team mode. In free-for-all
+ * (teamCount 1) nobody is a teammate, so everyone is hostile.
+ */
+export function sameTeam(world: World, aId: number, bId: number): boolean {
+  if (world.teamCount <= 1) return false;
+  const a = world.players.find((player) => player.id === aId);
+  const b = world.players.find((player) => player.id === bId);
+  if (!a || !b) return false;
+  return a.team === b.team;
+}
+
+/** Visual feedback for a shot that hit a teammate: no damage, but effects. */
+function spawnFriendlyHit(world: World, x: number, y: number, nx: number, ny: number): void {
+  const angle = Math.atan2(ny, nx);
+  burst(world, x, y, angle, 1.5, 380, 9, "#9be0ff", {
+    gravity: 300,
+    light: true,
+  });
+  world.rings.push({
+    x,
+    y,
+    size: 24,
+    life: 0.2,
+    maxLife: 0.2,
+    color: "#9be0ff",
+    filled: false,
+  });
 }
 
 function fireCooldownFor(player: PlayerState): number {
@@ -136,9 +167,26 @@ export function throwGrenade(world: World, player: PlayerState): void {
   player.recoil = 10;
 }
 
-function checkRoundOver(world: World): void {
+export function checkRoundOver(world: World): void {
   if (world.roundOver) return;
   const alive = world.players.filter((player) => player.alive);
+
+  // Team mode: the round ends when only one team still has living members.
+  if (world.teamCount > 1) {
+    const aliveTeams = new Set(alive.map((player) => player.team));
+    if (aliveTeams.size > 1) return;
+    world.roundOver = true;
+    // A total wipe (no survivors) is a draw: nobody scores.
+    const survivor = alive[0];
+    world.winnerId = survivor?.id ?? null;
+    world.resetTimer = SANDBOX_RESET_DELAY;
+    if (world.mode === "match" && survivor) {
+      const winningTeam = survivor.team;
+      world.teamScores[winningTeam] = (world.teamScores[winningTeam] ?? 0) + 1;
+    }
+    return;
+  }
+
   if (alive.length > 1) return;
   world.roundOver = true;
   world.winnerId = alive[0]?.id ?? null;
@@ -156,6 +204,7 @@ function applyDamage(
   knockX: number,
   knockY: number,
   heavy: boolean,
+  check = true,
 ): void {
   if (!target.alive || amount <= 0) return;
   const reduced = target.cards.includes("PLATE") ? amount * 0.75 : amount;
@@ -163,7 +212,12 @@ function applyDamage(
   target.hitFlash = 0.12;
   target.vx += knockX;
   target.vy += knockY;
-  world.hitStop = Math.max(world.hitStop, heavy ? HIT_STOP_BOOM : HIT_STOP_HURT);
+  // A slow-mo accent on impact, but don't chain it: only start/renew the beat
+  // if the previous one has mostly decayed, so a steady stream of hits (4-player
+  // buckshot+blast) reads as crisp impacts rather than a frozen screen.
+  if (world.hitStop < 0.02) {
+    world.hitStop = Math.max(world.hitStop, heavy ? HIT_STOP_BOOM : HIT_STOP_HURT);
+  }
   world.shake = Math.min(1, world.shake + (heavy ? 0.2 : 0.12));
   spawnDamageText(world, target.x, target.y, reduced);
   burst(
@@ -200,11 +254,11 @@ function applyDamage(
     });
     world.shake = Math.min(1, world.shake + 0.4);
   }
-  checkRoundOver(world);
+  if (check) checkRoundOver(world);
 }
 
 /** Kill a player who fell into a pit (out of the arena). */
-export function killFallen(world: World, player: PlayerState): void {
+export function killFallen(world: World, player: PlayerState, check = true): void {
   if (!player.alive) return;
   player.health = 0;
   player.alive = false;
@@ -218,7 +272,7 @@ export function killFallen(world: World, player: PlayerState): void {
     shard: true,
   });
   world.shake = Math.min(1, world.shake + 0.4);
-  checkRoundOver(world);
+  if (check) checkRoundOver(world);
 }
 
 export function explode(
@@ -227,37 +281,54 @@ export function explode(
   y: number,
   radius: number,
   damage: number,
+  ownerId?: number,
 ): void {
-  world.hitStop = Math.max(world.hitStop, 0.05 + radius / 2400);
+  // Shake + rings + sparks for every blast (cheap, and visual only). Hit-stop
+  // is deliberately NOT applied here: with BUCKSHOT+BLAST you fire a spread of
+  // explodable pellets, and a blast that only hits a wall (nobody) would
+  // freeze the whole sim every shot — the 4-player lag. Hit-stop is applied
+  // below only when the blast actually connects with a player.
   world.shake = Math.min(1, world.shake + 0.25 + radius / 220);
   world.rings.push(
     { x, y, size: radius * 1.15, life: 0.3, maxLife: 0.3, color: "#ff9d3c", filled: true },
     { x, y, size: radius * 1.6, life: 0.4, maxLife: 0.4, color: "#fff3c4", filled: true },
   );
-  burst(world, x, y, 0, 6.3, radius * 2.6, 16, "#ff8a2b", {
+  // Scale the particle budget with the blast size: a small bullet blast (radius
+  // ~55) needs far fewer sparks than a grenade (radius ~135). Buckshot+blast
+  // spawns many blasts per second, so keeping each one light is what keeps
+  // 4-player sims smooth.
+  const scale = Math.max(0.4, Math.min(1.1, radius / 135));
+  burst(world, x, y, 0, 6.3, radius * 2.6, Math.round(16 * scale), "#ff8a2b", {
     light: true,
     gravity: -60,
     sizeScale: 3.5,
   });
-  burst(world, x, y, 0, 6.3, radius * 5, 26, "#ffd27a", {
+  burst(world, x, y, 0, 6.3, radius * 5, Math.round(26 * scale), "#ffd27a", {
     light: true,
     gravity: 600,
   });
-  burst(world, x, y, 0, 6.3, radius * 2, 12, "#4a4866", {
+  burst(world, x, y, 0, 6.3, radius * 2, Math.round(12 * scale), "#4a4866", {
     gravity: -90,
     sizeScale: 3,
   });
-  burst(world, x, y, -Math.PI / 2, 2.6, radius * 4, 10, "#7a3f34", {
+  burst(world, x, y, -Math.PI / 2, 2.6, radius * 4, Math.round(10 * scale), "#7a3f34", {
     gravity: 1100,
   });
 
+  // Wired/swing blocks near the blast get shoved away from it (players, shots,
+  // and now explosions all move them).
+  explosionImpulseSwing(world, x, y, radius);
+
+  let connected = false;
   for (const target of world.players) {
     if (!target.alive) continue;
+    if (ownerId !== undefined && sameTeam(world, ownerId, target.id)) continue;
     const dx = target.x - x;
     const dy = target.y - y;
     const distance = Math.hypot(dx, dy) || 1;
     const factor = 1 - distance / (radius + target.radius);
     if (factor <= 0) continue;
+    connected = true;
     applyDamage(
       world,
       target,
@@ -265,14 +336,50 @@ export function explode(
       (dx / distance) * factor * 1200,
       (dy / distance) * factor * 1200 - 120,
       true,
+      false, // defer the round check until every target is resolved
     );
+  }
+  // A blast can kill the last members of every team in one call; only check
+  // once all damage is applied so a simultaneous total wipe is a draw rather
+  // than a win for whichever player happened to be processed last.
+  checkRoundOver(world);
+
+  // Only a blast that actually connects with a player earns the slow-mo beat.
+  // Empty-wall buckshot blasts don't freeze the game (that was the lag). The
+  // beat only renews once the previous one has decayed, so a constant stream of
+  // hits (4-player buckshot+blast) reads as impact, not a frozen screen.
+  if (connected && world.hitStop < 0.02) {
+    world.hitStop = Math.max(world.hitStop, 0.02 + radius / 4000);
+  }
+}
+
+/**
+ * A buckshot spread that lands as a tight cluster in one tick should explode
+ * as ONE blast, not one full explosion (and particle burst) per pellet. Mark
+ * any other live, nearby explodable bullet as dead so it's absorbed into the
+ * first one that detonates. Same look, a fraction of the per-frame cost.
+ */
+function absorbExplosionCluster(world: World, bullet: Bullet): void {
+  for (const other of world.bullets) {
+    if (other === bullet || !other.explodes || other.dead) continue;
+    if (Math.hypot(other.x - bullet.x, other.y - bullet.y) < 56) {
+      other.dead = true;
+    }
   }
 }
 
 function hitPlayerWithBullet(world: World, bullet: Bullet, target: PlayerState): void {
   if (bullet.explodes) {
     bullet.dead = true;
-    explode(world, bullet.x, bullet.y, 40 + bullet.damage * 3.5, Math.round(bullet.damage * 1.5));
+    absorbExplosionCluster(world, bullet);
+    explode(
+      world,
+      bullet.x,
+      bullet.y,
+      40 + bullet.damage * 3.5,
+      Math.round(bullet.damage * 1.5),
+      bullet.ownerId,
+    );
     return;
   }
   applyDamage(world, target, bullet.damage, bullet.vx * 0.1, -140, false);
@@ -297,13 +404,23 @@ export function updateBullets(world: World, dt: number): void {
         if (!contact) continue;
         bullet.x += contact.nx * contact.penetration;
         bullet.y += contact.ny * contact.penetration;
+        // A shot pushes a hanging swing block along its travel direction.
+        if (platform.swingIndex !== undefined) {
+          impulseSwing(world, platform.swingIndex, bullet.vx, bullet.vy);
+        }
         if (bullet.explodes) {
+          // A buckshot spread hits a wall as a tight cluster in one tick;
+          // absorb the neighbours into this single blast instead of spawning
+          // a separate full explosion (and particle burst) per pellet. Same
+          // look, a fraction of the per-frame cost.
+          absorbExplosionCluster(world, bullet);
           explode(
             world,
             bullet.x,
             bullet.y,
             40 + bullet.damage * 3.5,
             Math.round(bullet.damage * 1.5),
+            bullet.ownerId,
           );
           bullet.dead = true;
           break;
@@ -331,6 +448,15 @@ export function updateBullets(world: World, dt: number): void {
           Math.hypot(target.x - bullet.x, target.y - bullet.y) <
           target.radius + bullet.radius
         ) {
+          // Teammates: the shot lands with an effect but deals no damage.
+          if (sameTeam(world, bullet.ownerId, target.id)) {
+            const dx = target.x - bullet.x;
+            const dy = target.y - bullet.y;
+            const distance = Math.max(1, Math.hypot(dx, dy));
+            spawnFriendlyHit(world, bullet.x, bullet.y, dx / distance, dy / distance);
+            bullet.dead = true;
+            break;
+          }
           hitPlayerWithBullet(world, bullet, target);
           break;
         }
@@ -393,7 +519,7 @@ export function updateGrenades(world: World, dt: number): void {
 
     if (grenade.fuse <= 0) {
       grenade.dead = true;
-      explode(world, grenade.x, grenade.y, grenade.blastRadius, grenade.damage);
+      explode(world, grenade.x, grenade.y, grenade.blastRadius, grenade.damage, grenade.ownerId);
     }
   }
   world.grenades = world.grenades.filter((grenade) => !grenade.dead);

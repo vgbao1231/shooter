@@ -1,3 +1,4 @@
+import { getArena } from "./arena";
 import { ROUND_COUNTDOWN } from "./constants";
 import type {
   Bullet,
@@ -8,6 +9,7 @@ import type {
   PlayerState,
   Ring,
   RoundState,
+  SwingState,
   WeaponId,
   World,
 } from "./types";
@@ -40,6 +42,7 @@ export interface SnapshotPlayer {
   grounded: boolean;
   wallDir: -1 | 0 | 1;
   weaponId: WeaponId;
+  team: number;
 }
 
 export interface SnapshotBullet {
@@ -96,6 +99,13 @@ export interface SnapshotText {
   life: number;
 }
 
+export interface SnapshotSwing {
+  angle: number;
+  angVel: number;
+  bob: number;
+  bobVel: number;
+}
+
 export interface NetworkSnapshot {
   tick: number;
   shake: number;
@@ -112,6 +122,9 @@ export interface NetworkSnapshot {
   rings: SnapshotRing[];
   flashes: SnapshotFlash[];
   texts: SnapshotText[];
+  swings: SnapshotSwing[];
+  teamCount: number;
+  teamScores: number[];
 }
 
 export function serializeWorld(world: World): NetworkSnapshot {
@@ -144,6 +157,7 @@ export function serializeWorld(world: World): NetworkSnapshot {
       grounded: player.grounded,
       wallDir: player.wallDir,
       weaponId: player.weaponId,
+      team: player.team,
     })),
     bullets: world.bullets.map((bullet) => ({
       x: bullet.x,
@@ -193,6 +207,14 @@ export function serializeWorld(world: World): NetworkSnapshot {
       value: text.value,
       life: text.life,
     })),
+    swings: world.swingState.map((state) => ({
+      angle: state.angle,
+      angVel: state.angVel,
+      bob: state.bob,
+      bobVel: state.bobVel,
+    })),
+    teamCount: world.teamCount,
+    teamScores: [...world.teamScores],
   };
 }
 
@@ -231,6 +253,7 @@ function playerFromSnapshot(snap: SnapshotPlayer): PlayerState {
     score: 0,
     prevJumpHeld: false,
     prevGrenadeHeld: false,
+    team: snap.team,
   };
 }
 
@@ -243,6 +266,7 @@ export function createRenderWorld(
   arenaId: string,
   platformList: World["platformList"],
 ): World {
+  const arena = getArena(arenaId);
   return {
     tick: 0,
     time: 0,
@@ -253,6 +277,10 @@ export function createRenderWorld(
     arenaId,
     players: [],
     platformList,
+    staticPlatforms: platformList,
+    swingDefs: arena.swings ?? [],
+    swingState: [],
+    swingRects: [],
     bullets: [],
     grenades: [],
     particles: [],
@@ -273,6 +301,9 @@ export function createRenderWorld(
     roundNumber: 1,
     matchTarget: 3,
     matchOver: false,
+    teamCount: 1,
+    teamScores: [0],
+    cardPick: null,
   };
 }
 
@@ -289,6 +320,8 @@ export function applySnapshot(world: World, snap: NetworkSnapshot): void {
   world.roundNumber = snap.roundNumber;
   world.matchTarget = snap.matchTarget;
   world.matchOver = snap.matchOver;
+  world.teamCount = snap.teamCount;
+  world.teamScores = [...snap.teamScores];
   world.players = snap.players.map(playerFromSnapshot);
   world.bullets = snap.bullets.map(
     (bullet): Bullet => ({
@@ -369,6 +402,14 @@ export function applySnapshot(world: World, snap: NetworkSnapshot): void {
       life: text.life,
     }),
   );
+  world.swingState = snap.swings.map(
+    (swing): SwingState => ({
+      angle: swing.angle,
+      angVel: swing.angVel,
+      bob: swing.bob,
+      bobVel: swing.bobVel,
+    }),
+  );
 }
 
 /**
@@ -417,5 +458,15 @@ export function interpolateSnapshots(
       hitFlash: lerp(prev.hitFlash, next.hitFlash),
     };
   });
-  return { ...to, players };
+  const swings = to.swings.map((next, index) => {
+    const prev = from.swings[index];
+    if (!prev) return next;
+    return {
+      angle: prev.angle + (next.angle - prev.angle) * alpha,
+      angVel: prev.angVel + (next.angVel - prev.angVel) * alpha,
+      bob: prev.bob + (next.bob - prev.bob) * alpha,
+      bobVel: prev.bobVel + (next.bobVel - prev.bobVel) * alpha,
+    };
+  });
+  return { ...to, players, swings };
 }

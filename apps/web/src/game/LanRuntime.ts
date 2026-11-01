@@ -3,6 +3,8 @@ import {
   createRenderWorld,
   decayEffects,
   getArena,
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
   type HudState,
   type MatchEvent,
   type MatchStart,
@@ -31,16 +33,14 @@ export class LanRuntime {
   private readonly rendererWorld: ReturnType<typeof createRenderWorld>;
   private readonly cleanups: Array<() => void> = [];
   private readonly keys = new Set<string>();
-  private readonly noPointerLock: boolean;
 
   private frameHandle = 0;
   private lastTime = 0;
   private fps = 60;
-  private mouseX = 640;
+  private mouseX = ARENA_WIDTH / 2;
   private mouseY = 360;
   private leftDown = false;
   private rightDown = false;
-  private pointerLocked = false;
   private scores: Record<number, number> = {};
   private pendingEvent: MatchEvent | null = null;
 
@@ -53,7 +53,6 @@ export class LanRuntime {
     this.session = session;
     this.matchStart = matchStart;
     this.callbacks = callbacks;
-    this.noPointerLock = new URLSearchParams(window.location.search).has("noPointerLock");
     for (const player of matchStart.players) this.scores[player.id] = player.score;
 
     const arena = getArena(matchStart.arenaId);
@@ -62,7 +61,7 @@ export class LanRuntime {
       (window as unknown as { __INKSHOT_LAN__?: unknown }).__INKSHOT_LAN__ =
         this.rendererWorld;
     }
-    this.renderer = new ArenaRenderer(canvas, arena.platforms);
+    this.renderer = new ArenaRenderer(canvas, arena);
     this.attachListeners(canvas);
     this.lastTime = performance.now();
     this.frameHandle = requestAnimationFrame(this.loop);
@@ -95,9 +94,9 @@ export class LanRuntime {
 
     const pointerToWorld = (event: PointerEvent): { x: number; y: number } => {
       const bounds = canvas.getBoundingClientRect();
-      const scale = Math.max(bounds.width / 1280, bounds.height / 720);
-      const displayedWidth = 1280 * scale;
-      const displayedHeight = 720 * scale;
+      const scale = Math.min(bounds.width / ARENA_WIDTH, bounds.height / ARENA_HEIGHT);
+      const displayedWidth = ARENA_WIDTH * scale;
+      const displayedHeight = ARENA_HEIGHT * scale;
       const offsetX = (bounds.width - displayedWidth) / 2;
       const offsetY = (bounds.height - displayedHeight) / 2;
       return {
@@ -107,18 +106,11 @@ export class LanRuntime {
     };
 
     const aim = (event: PointerEvent): void => {
-      if (this.pointerLocked) {
-        const bounds = canvas.getBoundingClientRect();
-        const scale = Math.max(bounds.width / 1280, bounds.height / 720);
-        this.mouseX += event.movementX / scale;
-        this.mouseY += event.movementY / scale;
-      } else {
-        const point = pointerToWorld(event);
-        this.mouseX = point.x;
-        this.mouseY = point.y;
-      }
-      this.mouseX = Math.max(0, Math.min(1280, this.mouseX));
-      this.mouseY = Math.max(0, Math.min(720, this.mouseY));
+      const point = pointerToWorld(event);
+      this.mouseX = point.x;
+      this.mouseY = point.y;
+      this.mouseX = Math.max(0, Math.min(ARENA_WIDTH, this.mouseX));
+      this.mouseY = Math.max(0, Math.min(ARENA_HEIGHT, this.mouseY));
     };
 
     const onPointerMove = (event: PointerEvent): void => aim(event);
@@ -127,30 +119,16 @@ export class LanRuntime {
       if (event.button === 2) this.rightDown = true;
       else if (event.button === 0) this.leftDown = true;
       canvas.focus();
-      try {
-        aim(event);
-      } catch {
-        // ignore
-      }
+      aim(event);
       try {
         canvas.setPointerCapture(event.pointerId);
       } catch {
-        // already captured
-      }
-      if (!this.noPointerLock && document.pointerLockElement !== canvas) {
-        try {
-          void canvas.requestPointerLock();
-        } catch {
-          // ignore
-        }
+        // Pointer capture can be rejected; absolute aiming still works.
       }
     };
     const onPointerUp = (event: PointerEvent): void => {
       if (event.button === 2) this.rightDown = false;
       else if (event.button === 0) this.leftDown = false;
-    };
-    const onPointerLockChange = (): void => {
-      this.pointerLocked = document.pointerLockElement === canvas;
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -159,14 +137,12 @@ export class LanRuntime {
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-    document.addEventListener("pointerlockchange", onPointerLockChange);
     this.cleanups.push(() => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", onPointerUp);
-      document.removeEventListener("pointerlockchange", onPointerLockChange);
     });
   }
 
@@ -254,6 +230,7 @@ export class LanRuntime {
       y: entry.y,
       skin: "default",
       score: this.scores[id] ?? 0,
+      team: entry.team,
     };
   }
 
@@ -292,6 +269,16 @@ export class LanRuntime {
       roundNumber: snapshot.roundNumber,
       matchTarget: snapshot.matchTarget,
       matchOver: snapshot.matchOver,
+      teamCount: snapshot.teamCount,
+      teamScores: this.teamScores(snapshot),
     });
+  }
+
+  private teamScores(snapshot: NetworkSnapshot): Record<number, number> {
+    const scores: Record<number, number> = {};
+    snapshot.teamScores.forEach((score, team) => {
+      scores[team] = score;
+    });
+    return scores;
   }
 }

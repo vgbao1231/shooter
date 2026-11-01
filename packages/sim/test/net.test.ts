@@ -53,6 +53,33 @@ describe("net snapshot", () => {
     expect(renderWorld.players[2]?.isBot).toBe(true);
   });
 
+  it("round-trips team state (team / teamCount / teamScores)", () => {
+    const world = createWorld({
+      seed: 61,
+      mode: "match",
+      humanCount: 3,
+      botCount: 0,
+      teamCount: 2,
+      playerTeams: [0, 0, 1],
+      botEnabled: false,
+    });
+    // Force a known score so the round-trip can assert it.
+    world.teamScores = [1, 3];
+    for (let tick = 0; tick < 10; tick += 1) {
+      stepWorld(world, [idle(0), idle(1), idle(2)]);
+    }
+    const snapshot = serializeWorld(world);
+    expect(snapshot.teamCount).toBe(2);
+    expect(snapshot.teamScores).toEqual([1, 3]);
+    expect(snapshot.players.map((player) => player.team)).toEqual([0, 0, 1]);
+
+    const renderWorld = createRenderWorld(world.arenaId, getArena(world.arenaId).platforms);
+    applySnapshot(renderWorld, snapshot);
+    expect(renderWorld.teamCount).toBe(2);
+    expect(renderWorld.teamScores).toEqual([1, 3]);
+    expect(renderWorld.players.map((player) => player.team)).toEqual([0, 0, 1]);
+  });
+
   it("interpolates player positions between snapshots", () => {
     const from: NetworkSnapshot = {
       tick: 100,
@@ -84,6 +111,7 @@ describe("net snapshot", () => {
           grounded: true,
           wallDir: 0,
           weaponId: "pistol",
+          team: 0,
         },
       ],
       bullets: [],
@@ -92,6 +120,9 @@ describe("net snapshot", () => {
       rings: [],
       flashes: [],
       texts: [],
+      swings: [],
+      teamCount: 1,
+      teamScores: [0],
     };
     const to: NetworkSnapshot = {
       ...from,

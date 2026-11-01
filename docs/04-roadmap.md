@@ -1,6 +1,6 @@
 # 04 — Roadmap
 
-> **Status:** Phase 3 implemented (Colyseus LAN host, lobby, authoritative match). Owner approved Phase 1 feel and Phase 2 match mode. Remaining playtest: full multi-round LAN completion + real-LAN feel before Phase 4.
+> **Status:** Phase 3 implemented (Colyseus LAN host, lobby, authoritative match), plus a post-Phase-3 UX batch: no pointer lock (absolute aim), Esc pause/settings overlay, 3 modes (Training / Vượt ải with level-select / LAN), map previews, 1600×720 arenas with `PLAYER_RADIUS=16`, and two distinct arena layouts + palettes. Owner approved Phase 1 feel and Phase 2 match mode. Remaining playtest: full multi-round LAN completion + real-LAN feel before Phase 4.
 > **Estimate:** ~11–17 engineer-weeks for one developer at ~30–35 focused hours/week.
 > **Target:** 2–4 player LAN shooter, two arenas, pistol-only combat with card emulation, grenades, bots, optional 1v1 cards.
 
@@ -63,10 +63,10 @@ Scope (implemented):
 - Health, damage, hit flash, knockback, death, K.O.; gauntlet waves with shop and skin unlocks.
 - 13-card catalog across Projectile / Combat / Defense / Movement / Passive; pick 1 of 3.
 - Deck panel shows owned/unseen cards; bullet/grenade muzzle clamped against walls.
-- Full-viewport map, no vitality block UI; pointer lock keeps the cursor inside the arena.
+- Full-viewport map, no vitality block UI; absolute mouse aim (no pointer lock); Esc opens a pause/settings overlay.
 - Debug overlay: FPS, tick, position, wall, bots, FX.
 - Unit tests for movement/collision/combat/cards/bullet-path; deterministic replay test.
-- Visual smoke test at 1440×900 via Playwright (`?noPointerLock=1`).
+- Visual smoke test at 1440×900 via Playwright.
 
 Non-goals: LAN, lobby, teams, rounds, 2–4 match flow, final card balance, audio.
 
@@ -78,7 +78,7 @@ Exit criteria:
 - [x] Fighter reads at gameplay scale; four-color mock is distinguishable.
 - [x] VFX match the demo and stay under the particle cap.
 - [x] Deterministic replay passes.
-- [x] Gauntlet wave/coin/shop/skin flow works; pointer lock keeps the cursor inside.
+- [x] Gauntlet wave/coin/shop/skin flow works; Esc opens the pause overlay.
 - [x] Short recording demonstrates the slice (owner playtest).
 
 **Gate:** Fix movement or art pipeline before Phase 2. Do not build modes on a bad core.
@@ -89,20 +89,19 @@ Exit criteria:
 
 **Goal:** A complete local match with 2–4 slots, modes, rounds, bots, scoring — no network.
 
-Phase 2 is implemented pragmatically: **Match mode = 1 human vs 1–3 bots**, first-to-N, with the round/match state machine in the sim (deterministic, LAN-ready). Real 2v2/FFA with multiple humans needs LAN (Phase 3), so those are not claimed here.
+Phase 2 delivered the local match flow (1 human vs 1–3 bots, first-to-N, sim-driven rounds). The local Match mode has since been removed: LAN (Phase 3) covers multi-human, and the Gauntlet is entered through a level-select. Real 2v2/team matches with multiple humans need LAN (Phase 3); FFA was removed (4 players = 4 teams).
 
 Scope (implemented):
 
-- Match mode: 1 human + 1–3 bots, Easy/Normal/Hard difficulty, first-to-3 or first-to-5.
-- Round flow: countdown → playing → round end → score → next round → match end, all sim-driven.
+- Round flow: countdown → playing → round end → score → next round → match end, all sim-driven (LAN + local).
 - Round award: last side alive scores; bots respawn each round with scores kept.
 - Health, damage, death (including pit fall-death) resolve each round.
 - Server-side bots: Easy/Normal/Hard; same `InputCommand` pipeline.
 - HUD: score on both fighter cards, round number + first-to target, READY / round-result / match-end banners, Rematch overlay.
-- `C` (cards) disabled in Match; cards remain a Training/Gauntlet tool.
-- Sim tests for the match flow; Playwright smoke drives a full Match to completion.
+- `C` (cards) is a Training/Gauntlet tool.
+- Sim tests for the round flow; Playwright smoke drives Training + Gauntlet (level-select) to completion.
 
-Deferred to Phase 3 (LAN): FFA 2–4, 1v2/1v3/2v2 with multiple humans, team hostility/friendly-fire, underdog HP, spawn sets per mode, overheat.
+Deferred to Phase 3 (LAN): 2v2/1v2/1v3 with multiple humans, team hostility/friendly-fire, underdog HP, spawn sets per mode, overheat. FFA was removed (a 4-player free-for-all is just 4 teams).
 
 Non-goals (Phase 2): LAN, real multi-human modes, full card progression, final menus/audio.
 
@@ -111,7 +110,7 @@ Exit criteria:
 - [x] 1 human vs. 1 Normal bot is useful (owner playtest — owner approved Phase 2).
 - [x] Round flow completes: countdown, round award, next round, match end, rematch.
 - [x] Bot difficulty (Easy/Normal/Hard) is selectable and fed to the sim.
-- [x] Sim tests pass for the match flow; Playwright Match smoke passes with no console errors.
+- [x] Sim tests pass for the round flow; Playwright smoke passes with no console errors.
 - [x] 1v2/1v3 vs bots feel balanced (owner playtest — owner approved Phase 2).
 - [x] All guns/grenades behave; no collision/cooldown exploits (sim tests + e2e).
 - [ ] 60 fps with 1 human + 3 bots + VFX.
@@ -140,11 +139,11 @@ Scope (implemented):
 - 2-browser Playwright LAN e2e (`pnpm check:e2e:lan`): connect → lobby (1 host + 2 guest + open slots) → host start → both reach playing → host moves and the guest sees the host at the same x. 0 errors.
 - **Playtest #2 on real LAN is still to do** (full multi-round completion + real-LAN feel).
 
-Non-goals: public internet, accounts, reconnect, Redis, multi-host, anti-cheat beyond authority. Also not in Phase 3: teams/FFA mode pick (lobby is one shared match for now), LAN card offers, latency harness.
+Non-goals: public internet, accounts, reconnect, Redis, multi-host, anti-cheat beyond authority. Also not in Phase 3: LAN card offers, latency harness.
 
 Exit criteria:
 
-- [ ] 1v1, 4-player FFA, 2v2 complete on LAN. *(2-browser flow works; 4-browser + real-LAN pending)*
+- [ ] 1v1, 2v2 complete on LAN. *(2-browser flow works; 4-browser + real-LAN pending; FFA removed — 4 players = 4 teams)*
 - [ ] 1v2/1v3 complete with correct teams and HP bonus. *(multi-human works; team hostility/HP bonus deferred)*
 - [x] Human + bot match completes. *(2 humans + 1 bot reach playing and sync in e2e)*
 - [x] Guest/host disconnect triggers bot takeover; match continues. *(server `onLeave` bot takeover; e2e-level)*
@@ -164,7 +163,7 @@ Exit criteria:
 Scope:
 
 - Tune 1v2/1v3 HP, spawn fairness, solo strategy.
-- Tune 2v2 readability and FFA pacing.
+- Tune 2v2/3-way/4-way readability and team pacing.
 - Bot tuning: target selection, spacing, grenades, difficulty curve.
 - Bot takeover quality.
 - 13 cards: BLAST, BOUNCE, RAPID, BUCKSHOT, PIERCE, MEGA, FRAG, NITRO, VITAL, PLATE, DASH, SPRING, FORTUNE.
@@ -240,7 +239,7 @@ Exit criteria:
 
 ## 10. Tests and risks
 
-**Tests:** unit sim (movement, collision, weapons, grenade, cards, rounds, overheat); determinism replay; integration (lobby, teams, bot fill/takeover); E2E (4-browser FFA, 2v2, solo bot, card pick); LAN (2–4 machines, 5–100 ms, loss/jitter); performance (60 fps, host tick); manual playtests #1–#4.
+**Tests:** unit sim (movement, collision, weapons, grenade, cards, rounds, overheat); determinism replay; integration (lobby, teams, bot fill/takeover); E2E (4-browser team match, 2v2, solo bot, card pick); LAN (2–4 machines, 5–100 ms, loss/jitter); performance (60 fps, host tick); manual playtests #1–#4.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
@@ -259,4 +258,4 @@ Exit criteria:
 
 A phase is done only when scope is implemented, acceptance criteria are demonstrated, tests pass, no P0/P1 bugs are open, docs are updated, a build/recording exists, and the owner approves moving on.
 
-**Current:** Phase 3 implemented. Owner approved Phase 1 feel and Phase 2 match mode. `apps/server` is a Colyseus 0.16 LAN host (static client + WebSocket on one port via `pnpm host`); `GameRoom` covers lobby → match (4 slots, host controls, bot fill/takeover, rematch); sim is authoritative at 60 Hz with 30 Hz snapshots and 50 ms client interpolation (no prediction yet). 19 sim tests pass (movement, collision, combat, cards, bullet-path, pits, deterministic replay, match round flow, net serializer/interpolate/decay). `pnpm check:e2e` covers Training, Bot Gauntlet, and a full local Match with no console errors; `pnpm check:e2e:lan` covers a 2-browser LAN flow (connect → lobby → host start → both playing → host moves, guest sees the same x) with no console errors. Next: owner playtest of a full multi-round LAN match on real hardware before Phase 4.
+**Current:** Phase 3 implemented, plus a post-Phase-3 UX batch. Owner approved Phase 1 feel and Phase 2 match mode. `apps/server` is a Colyseus 0.16 LAN host (static client + WebSocket on one port via `pnpm host`); `GameRoom` covers lobby → match (4 slots, host controls, bot fill/takeover, rematch); sim is authoritative at 60 Hz with 30 Hz snapshots and 50 ms client interpolation (no prediction yet). Pointer lock is removed (absolute aim); `Esc` opens a pause/settings overlay; the local Match mode is gone (3 modes: Training, Vượt ải/Bot Gauntlet with a level-select, LAN); map previews render in the menu, lobby, and level-select; both arenas are now 1600×720 with `PLAYER_RADIUS=16` and distinct layouts + palettes (Proving Grounds teal pyramid; Skyline dark rust towers). 19 sim tests pass (movement, collision, combat, cards, bullet-path, pits, deterministic replay, round flow, net serializer/interpolate/decay). `pnpm check:e2e` covers Training, Gauntlet (level-select → level 1), and the Esc pause overlay with no console errors; `pnpm check:e2e:lan` covers a 2-browser LAN flow (connect → lobby → host start → both playing → host moves, guest sees the same x) with no console errors. Next: owner playtest of a full multi-round LAN match on real hardware before Phase 4.

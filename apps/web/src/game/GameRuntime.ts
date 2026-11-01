@@ -1,5 +1,7 @@
 import {
   getArena,
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
   applyCard as applyCardToPlayer,
   createBotInput,
   createWorld,
@@ -41,7 +43,7 @@ export interface GameHandle {
 }
 
 export interface GameRuntimeOptions {
-  mode: "training" | "gauntlet" | "match";
+  mode: "training" | "gauntlet";
   arenaId: string;
   botCount?: number;
   botDifficulty?: BotDifficulty;
@@ -54,20 +56,18 @@ export class GameRuntime implements GameHandle {
   private readonly cleanups: Array<() => void> = [];
   private readonly keys = new Set<string>();
   private readonly callbacks: GameCallbacks;
-  private readonly noPointerLock: boolean;
 
   private frameHandle = 0;
   private lastTime = 0;
   private accumulator = 0;
   private hudAccumulator = 0;
   private fps = 60;
-  private mouseX = 640;
+  private mouseX = ARENA_WIDTH / 2;
   private mouseY = 300;
   private leftDown = false;
   private rightDown = false;
   private paused = false;
   private debug = false;
-  private pointerLocked = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -75,7 +75,6 @@ export class GameRuntime implements GameHandle {
     options: GameRuntimeOptions,
   ) {
     this.callbacks = callbacks;
-    this.noPointerLock = new URLSearchParams(window.location.search).has("noPointerLock");
     this.world = createWorld({
       seed: (Date.now() ^ 0x51f15e) >>> 0,
       mode: options.mode,
@@ -88,7 +87,7 @@ export class GameRuntime implements GameHandle {
       (window as unknown as { __INKSHOT__?: World }).__INKSHOT__ = this.world;
     }
     const arena = getArena(options.arenaId);
-    this.renderer = new ArenaRenderer(canvas, arena.platforms);
+    this.renderer = new ArenaRenderer(canvas, arena);
     this.attachListeners(canvas);
     this.lastTime = performance.now();
     this.pushHud();
@@ -102,9 +101,6 @@ export class GameRuntime implements GameHandle {
     this.leftDown = false;
     this.rightDown = false;
     this.keys.clear();
-    if (paused && document.pointerLockElement) {
-      document.exitPointerLock();
-    }
     this.pushHud();
   }
 
@@ -154,15 +150,13 @@ export class GameRuntime implements GameHandle {
 
   destroy(): void {
     cancelAnimationFrame(this.frameHandle);
-    if (document.pointerLockElement === this.canvas) {
-      document.exitPointerLock();
-    }
     for (const cleanup of this.cleanups) cleanup();
     this.cleanups.length = 0;
   }
 
   private attachListeners(canvas: HTMLCanvasElement): void {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (this.paused && event.code !== "F1") return;
       if (event.code === "KeyC" && !event.repeat) {
         event.preventDefault();
         this.callbacks.onToggleCards();
@@ -196,9 +190,9 @@ export class GameRuntime implements GameHandle {
 
     const pointerToWorld = (event: PointerEvent): { x: number; y: number } => {
       const bounds = canvas.getBoundingClientRect();
-      const scale = Math.max(bounds.width / 1280, bounds.height / 720);
-      const displayedWidth = 1280 * scale;
-      const displayedHeight = 720 * scale;
+      const scale = Math.min(bounds.width / ARENA_WIDTH, bounds.height / ARENA_HEIGHT);
+      const displayedWidth = ARENA_WIDTH * scale;
+      const displayedHeight = ARENA_HEIGHT * scale;
       const offsetX = (bounds.width - displayedWidth) / 2;
       const offsetY = (bounds.height - displayedHeight) / 2;
       return {
@@ -208,18 +202,11 @@ export class GameRuntime implements GameHandle {
     };
 
     const aim = (event: PointerEvent): void => {
-      if (this.pointerLocked) {
-        const bounds = canvas.getBoundingClientRect();
-        const scale = Math.max(bounds.width / 1280, bounds.height / 720);
-        this.mouseX += event.movementX / scale;
-        this.mouseY += event.movementY / scale;
-      } else {
-        const point = pointerToWorld(event);
-        this.mouseX = point.x;
-        this.mouseY = point.y;
-      }
-      this.mouseX = Math.max(0, Math.min(1280, this.mouseX));
-      this.mouseY = Math.max(0, Math.min(720, this.mouseY));
+      const point = pointerToWorld(event);
+      this.mouseX = point.x;
+      this.mouseY = point.y;
+      this.mouseX = Math.max(0, Math.min(ARENA_WIDTH, this.mouseX));
+      this.mouseY = Math.max(0, Math.min(ARENA_HEIGHT, this.mouseY));
     };
 
     const onPointerMove = (event: PointerEvent): void => {
@@ -228,9 +215,6 @@ export class GameRuntime implements GameHandle {
 
     const onPointerDown = (event: PointerEvent): void => {
       if (this.paused) return;
-      // Set firing state FIRST so a throwing capture/lock call can never
-      // swallow the shot. Pointer capture throws while the pointer is
-      // already captured by the pointer-lock system.
       if (event.button === 2) {
         event.preventDefault();
         this.rightDown = true;
@@ -238,22 +222,11 @@ export class GameRuntime implements GameHandle {
         this.leftDown = true;
       }
       canvas.focus();
-      try {
-        aim(event);
-      } catch {
-        // ignore; aim uses movementX/Y while locked and never throws.
-      }
+      aim(event);
       try {
         canvas.setPointerCapture(event.pointerId);
       } catch {
-        // Already captured (pointer lock); firing state is already set.
-      }
-      if (!this.noPointerLock && document.pointerLockElement !== canvas) {
-        try {
-          void canvas.requestPointerLock();
-        } catch {
-          // Pointer lock can be rejected; absolute aiming remains.
-        }
+        // Pointer capture can be rejected; absolute aiming still works.
       }
     };
 
@@ -272,10 +245,6 @@ export class GameRuntime implements GameHandle {
       event.preventDefault();
     };
 
-    const onPointerLockChange = (): void => {
-      this.pointerLocked = document.pointerLockElement === canvas;
-    };
-
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", clearInput);
@@ -284,7 +253,6 @@ export class GameRuntime implements GameHandle {
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("contextmenu", onContextMenu);
-    document.addEventListener("pointerlockchange", onPointerLockChange);
 
     this.cleanups.push(() => {
       window.removeEventListener("keydown", onKeyDown);
@@ -295,7 +263,6 @@ export class GameRuntime implements GameHandle {
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("contextmenu", onContextMenu);
-      document.removeEventListener("pointerlockchange", onPointerLockChange);
     });
   }
 
@@ -354,6 +321,10 @@ export class GameRuntime implements GameHandle {
       roundNumber: this.world.roundNumber,
       matchTarget: this.world.matchTarget,
       matchOver: this.world.matchOver,
+      teamCount: this.world.teamCount,
+      teamScores: Object.fromEntries(
+        this.world.teamScores.map((score, team) => [team, score]),
+      ),
     });
   }
 

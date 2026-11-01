@@ -28,6 +28,7 @@ export function burst(
   options: BurstOptions = {},
 ): void {
   for (let index = 0; index < count; index += 1) {
+    if (world.particles.length >= PARTICLE_CAP) break; // budget reached: drop extras
     const direction = angle + (fxRandom(world) - 0.5) * spread;
     const velocity = speed * (0.3 + fxRandom(world) * 0.7);
     const life = 0.25 + fxRandom(world) * 0.45;
@@ -44,9 +45,6 @@ export function burst(
       light: options.light ?? false,
       shard: options.shard ?? false,
     });
-  }
-  if (world.particles.length > PARTICLE_CAP) {
-    world.particles.splice(0, world.particles.length - PARTICLE_CAP);
   }
 }
 

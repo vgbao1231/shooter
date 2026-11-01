@@ -27,7 +27,7 @@ const gameServer = new Server({
   transport: new WebSocketTransport({ server: httpServer }),
 });
 
-gameServer.define("lobby", GameRoom);
+gameServer.define("lobby", GameRoom).filterBy(["code"]);
 
 const port = Number(process.env.PORT ?? 8080);
 const hostname = process.env.HOST ?? "0.0.0.0";

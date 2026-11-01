@@ -77,15 +77,15 @@ Host: `http://<host-lan-ip>:8080` (run `pnpm host`; the built client is served f
 |---|---|
 | Tick | 60 Hz |
 | Step | 1/60 s |
-| Arena | 1280 × 720 |
+| Arena | 1600 × 720 |
 | Player collision | Circle vs. AABB platforms |
-| Player radius | 20 px (small relative to the dense map, ROUNDS-like proportion) |
+| Player radius | 16 px (small relative to the wide map so 2–4 players have room) |
 | Health | 100, no shield, no ammo/reload |
 | Movement | Run, jump, wall slide, wall jump, wall climb with stamina |
 | Pits | Floor gaps; falling below the arena kills (no respawn) |
 | Weapons | Pistol only; shotgun/SMG are emulated by cards (`BUCKSHOT`, `RAPID`); grenade |
-| Modes | Training (1v1 sandbox), Bot Gauntlet (waves, coins, upgrades, skins), and Match (1 human vs 1–3 bots, rounds, first-to-3/5, Easy/Normal/Hard) |
-| Arenas | Proving Grounds + Skyline; selectable pre-match, same layout per match |
+| Modes | Training (1v1 sandbox), Vượt ải / Bot Gauntlet (level-select, escalating difficulty, all open), LAN (2–4 humans + bots, first-to-N) |
+| Arenas | Proving Grounds + Skyline; distinct layouts + palettes, selectable pre-match, same layout per match |
 | Cards | 13-card catalog across 5 categories; sandbox/shop pick in Phase 1, loser-picks in a later phase |
 | Randomness | Seeded xorshift PRNG; no `Math.random()` in sim |
 | Authority | Host (Phase 1 is local; Phase 3 adds the network host) |
@@ -139,9 +139,9 @@ Server-side, three difficulties, same `InputCommand` pipeline. Read authoritativ
 
 In Phase 3 the server takes over on `onLeave` mid-match: it sets `isBot`/`botControlled` on the human's player and `createBotInput` lazily creates the bot brain, so the round continues without stalling.
 
-Phase 1 training: 1 human + 1 Normal bot in a sandbox; cards are available via `C` for feel-testing. Bot Gauntlet spawns waves of bots (1 bot per wave, waves escalate), awards coins for clears, and offers a shop (damage / max HP / speed / random card). Skins unlock at waves 3 / 5 / 8.
+Phase 1 training: 1 human + 1 Normal bot in a sandbox; cards are available via `C` for feel-testing. Bot Gauntlet is entered through a level-select (6 levels, Easy→Hard, 1→3 bots, arenas alternating, all open), awards coins for clears, and offers a shop (damage / max HP / speed / random card). Skins unlock at waves 3 / 5 / 8.
 
-Phase 2 Match: the round/match state machine lives in the sim (deterministic, LAN-ready): `roundState` (`countdown`/`playing`/`roundEnd`/`matchEnd`), `roundTimer`, `roundNumber`, `matchTarget`, `matchOver`, `botDifficulty`, and per-player `score`. `stepWorld` drives the countdown freeze and the round-end → next-round/match-end transitions; `checkRoundOver` awards the round to the last side alive. The client reads this state and renders READY / round-result / match-end banners and a Rematch overlay. `C` is disabled in Match mode.
+LAN match: the round/match state machine lives in the sim (deterministic, LAN-ready): `roundState` (`countdown`/`playing`/`roundEnd`/`matchEnd`), `roundTimer`, `roundNumber`, `matchTarget`, `matchOver`, `botDifficulty`, and per-player `score`. `stepWorld` drives the countdown freeze and the round-end → next-round/match-end transitions; `checkRoundOver` awards the round to the last side alive. The client reads this state and renders READY / round-result / match-end banners and a host-only Rematch overlay.
 
 ---
 
@@ -159,6 +159,6 @@ Phase 2 Match: the round/match state machine lives in the sim (deterministic, LA
 
 **Security:** LAN group is trusted. Host validates movement, weapons, cooldowns, damage, hostility, and card picks. Reject unknown fields, out-of-range values, excessive rate. Origin check. No accounts/tokens/DB. Sanitize names. No public exposure.
 
-**Budgets:** 60 fps at 1280×720 with 4 players + VFX; host tick p95 < 4 ms with 4 players + 20 projectiles; ~500 live particles; no external asset/font requests; playable at 5–50 ms RTT, tested to 100 ms.
+**Budgets:** 60 fps at 1600×720 with 4 players + VFX; host tick p95 < 4 ms with 4 players + 20 projectiles; ~500 live particles; no external asset/font requests; playable at 5–50 ms RTT, tested to 100 ms.
 
-**Exists today:** a pnpm workspace with `packages/sim` (fixed-step sim + net serializer + protocol + tests), `apps/web` (React + Canvas 2D client), and `apps/server` (Colyseus LAN host). `pnpm dev` runs the menu → Training, Bot Gauntlet, or Match across two arenas; `pnpm host` builds the client and starts the LAN host at `http://0.0.0.0:8080` (built client + WebSocket on one port). `pnpm test` covers movement, collision, combat, cards, bullet wall-clamping, deterministic replay, the match round flow, and the net serializer/interpolation/decay. `pnpm check:e2e` drives a full local Match; `pnpm check:e2e:lan` (needs the Vite dev server on 5173 + the LAN host on 8080) drives a 2-browser LAN flow: connect → lobby (1 host + 2 guest + open slots) → host start → both reach playing → host moves and the guest sees the host at the same x. Pointer lock keeps the mouse inside the arena; `?noPointerLock=1` disables it for automated checks. **Remaining playtest items:** full multi-round LAN completion and real-LAN feel before Phase 4.
+**Exists today:** a pnpm workspace with `packages/sim` (fixed-step sim + net serializer + protocol + tests), `apps/web` (React + Canvas 2D client), and `apps/server` (Colyseus LAN host). `pnpm dev` runs the menu → Training, Vượt ải / Bot Gauntlet (level-select), or LAN across two arenas; `pnpm host` builds the client and starts the LAN host at `http://0.0.0.0:8080` (built client + WebSocket on one port). `pnpm test` covers movement, collision, combat, cards, bullet wall-clamping, deterministic replay, the round flow, and the net serializer/interpolation/decay. `pnpm check:e2e` drives Training + Gauntlet (level-select) + the Esc pause overlay; `pnpm check:e2e:lan` (needs the Vite dev server on 5173 + the LAN host on 8080) drives a 2-browser LAN flow: connect → lobby (1 host + 1 guest + open slots) → host start → both reach playing → host moves and the guest sees the host at the same x. Pointer lock is removed (absolute mouse aim; Esc opens a pause/settings overlay). **Remaining playtest items:** full multi-round LAN completion and real-LAN feel before Phase 4.

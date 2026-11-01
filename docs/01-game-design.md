@@ -1,6 +1,6 @@
 # 01 — Game Design
 
-> **Status:** Phase 3 LAN implemented (2–4 browsers on one LAN complete an authoritative match via the host). Teams/FFA mode pick and per-round card picks remain later phases.
+> **Status:** Phase 3 LAN implemented (2–4 browsers on one LAN complete an authoritative match via the host). A UX batch removed pointer lock (absolute aim), added an Esc pause overlay, collapsed to 3 modes (Training / Vượt ải with level-select / LAN), added map previews, widened arenas to 1600×720 (`PLAYER_RADIUS=16`), split the two arenas into distinct layouts + palettes, and added real teams (2–4 sides; FFA removed) with swing platforms on Skyline. Per-round card picks remain later phases.
 > **Scope:** 2–4 player LAN shooter, two-arena pool, one life per round, bots, optional 1v1 cards. Phase 3 delivers LAN (multi-human + bots) for a shared first-to-N match; teams and the card layer are Phase 4+.
 
 ---
@@ -27,7 +27,7 @@ The MVP deliberately has **no shield, ammo, reload, pickups, respawn, or weapon 
 | Match target | Host selects first to 3 or first to 5 |
 | Overheat | At 75 s, escalating damage until the round ends |
 | Round cap | None |
-| Friendly fire | Off in team modes; FFA is all-hostile |
+| Friendly fire | Off in team modes (all LAN matches are team-based; no FFA) |
 | Spawns | Fixed per mode; no spawn invulnerability |
 
 ```text
@@ -36,7 +36,7 @@ Lobby → Countdown 1.6 s → Playing → RoundEnd 1.9 s
       → CardPick (1v1, scored round only; Phase 4)
 ```
 
-A draw skips card selection and replays the round. Phase 2 implements the local 1-human-vs-bots flow: countdown freezes play until it elapses, a round ends when one side remains, the winner scores, a round-end banner shows, and the next round starts or the match ends when a side reaches the target. `C` (cards) is disabled in Match mode; cards remain a Training/Gauntlet tool in Phase 2.
+A draw skips card selection and replays the round. The sim drives the LAN match (and the local gauntlet/training worlds): countdown freezes play until it elapses, a round ends when one side remains, the winner scores, a round-end banner shows, and the next round starts or the match ends when a side reaches the target. `C` (cards) is a Training/Gauntlet tool; the local Match mode was removed (LAN covers multi-human).
 
 ---
 
@@ -45,9 +45,8 @@ A draw skips card selection and replays the round. Phase 2 implements the local 
 | Mode | Players | Teams | Notes |
 |---|---|---|---|
 | Training (Phase 1) | 1 human + 1 bot | None | Sandbox; cards via `C`; feel-testing |
-| Bot Gauntlet (Phase 1) | 1 human + bots | None | Waves escalate; coins → shop upgrades; skins at waves 3/5/8 |
-| Match (Phase 2) | 1 human + 1–3 bots | None | Rounds; first-to-3/5; Easy/Normal/Hard bots; cards disabled |
-| FFA | 2–4 | None | Last alive wins (Phase 3 LAN) |
+| Bot Gauntlet (Phase 1) | 1 human + bots | None | Level-select (6 levels, escalating difficulty, all open); waves escalate; coins → shop upgrades; skins at waves 3/5/8 |
+| Team (Phase 3 LAN) | 2–4 | 2/3/4 sides | Lobby columns; friendly fire off; removed FFA (a 4-player "free-for-all" is just 4 teams) |
 | Duel | 2 | 1v1 | Cards enabled (Phase 4) |
 | Team | 4 | 2v2 | Friendly fire off (Phase 3 LAN) |
 | Asymmetric | 3 | 1v2 | Solo player +50 max HP (Phase 3 LAN) |
@@ -72,11 +71,11 @@ A draw skips card selection and replays the round. Phase 2 implements the local 
 | Hold left mouse | Shoot (pistol) |
 | Right mouse or `G` | Grenade |
 | `C` | Cards (sandbox / shop pick) |
-| `Esc` | Close overlay / release pointer lock |
+| `Esc` | Pause/settings overlay (Resume / Menu) |
 | `R` | Reset sandbox (Phase 1) |
 | `F1` | Debug overlay |
 
-Keyboard + mouse only. One human per browser; no split-screen. Clicking the arena locks the pointer so the cursor cannot leave the window; `?noPointerLock=1` disables it for automated tests.
+Keyboard + mouse only. One human per browser; no split-screen. The mouse aims absolutely across the arena (no pointer lock); `Esc` opens the pause/settings overlay in local modes.
 
 ---
 
@@ -125,7 +124,7 @@ After 75 s, all living players take escalating damage until a winner remains. Th
 - One copy per player; effects last the match.
 - Offers are host-authoritative and hidden from the opponent.
 - 20 s timeout; auto-pick the first card.
-- No cards in FFA, 2v2, 1v2, or 1v3.
+- No cards in 2v2, 1v2, or 1v3 (team LAN matches).
 - Phase 1 sandbox: player picks 1 of 3 freely with `C` to test feel. Gauntlet buys upgrades from the shop and draws a random card.
 - Deck panel shows every card and which are owned vs. unseen.
 
@@ -160,13 +159,13 @@ No rarity, lore, collection, or card art pack.
 - Read only authoritative state; no hidden information.
 - Deterministic under a fixed seed.
 - Phase 1 training preset: 1 human + 1 Normal bot in a sandbox; cards are available via `C` for feel-testing. Gauntlet waves spawn one bot per wave and escalate.
-- Phase 2 Match preset: 1 human vs 1–3 bots at Easy/Normal/Hard, first-to-3 or first-to-5, with the sim-driven round state machine (countdown → playing → round end → next round / match end).
+- Phase 2 Match preset was 1 human vs 1–3 bots; the local Match mode is now removed (LAN covers multi-human). The Gauntlet is entered through a level-select with 6 levels (Easy→Hard, 1→3 bots, arenas alternating), all open for now.
 
 ---
 
 ## 8. Arena and HUD
 
-**Arena pool:** two 1280×720 mirrored arenas, selectable pre-match, both dense and filling the frame so wall-climbing matters: **Proving Grounds** (crenellated castle on a stepped pyramid) and **Skyline** (central spire on a wide base with corner towers). Each has a **segmented floor with deadly pits (voids)** between the segments, tall side towers, elevated side platforms, and a tall climbable central structure. Falling into a pit drops you out of the arena and kills you. Fighters (radius 20) are small relative to the map, matching the ROUNDS-style proportion. Dark teal background, pink/orange platforms, brown pillars, ink outlines. Spawn sets for every mode. The map renders full-viewport with `object-fit: cover`.
+**Arena pool:** two distinct 1600×720 arenas, selectable pre-match, each dense enough that wall-climbing matters: **Proving Grounds** (teal background, tan platforms, a crenellated castle on a central stepped pyramid, symmetric stepped side platforms, tall side towers) and **Skyline** (dark background, rust/red platforms, two symmetric stepped tower clusters flanking a wide central pit). Each has a **segmented floor with deadly pits (voids)** between the segments and tall side structures. Falling into a pit drops you out of the arena and kills you. Fighters (radius 16) are small relative to the wide map so 2–4 players have room. Each arena carries its own palette (background + platform colors); the renderer reads it from `ArenaDefinition.palette`. Spawn sets for every mode. The map renders full-viewport with `object-fit: cover`.
 
 **HUD:**
 
@@ -177,7 +176,7 @@ No rarity, lore, collection, or card art pack.
 - Player chips: color, badge, name, `BOT`/`HOST` tag.
 - Team modes: team score, teammate HP, solid/dashed team markers.
 - Banners: countdown (`READY` + round number), `ROUND` result (`takes it` + score), match end, `OVERHEAT`, `K.O.`, `DRAW`, `WAVE CLEAR`, `GAUNTLET OVER`.
-- Match: score shown on both fighter cards (e.g. `Score 2 / 3`); round number and first-to target in the mode line; match-end overlay with Rematch.
+- LAN match: score shown on both fighter cards (e.g. `Score 2 / 3`); round number and first-to target in the mode line; match-end overlay with host-only Rematch.
 - Cards: hand, offer overlay, opponent “choosing…” state.
 - Gauntlet: coins, wave, shop overlay, game-over overlay.
 
@@ -193,10 +192,10 @@ These are post-MVP candidates, not hidden scope.
 
 ## 10. Acceptance
 
-- Full 4-player FFA and 2v2 complete.
+- Full 4-player team match (2v2) complete; FFA removed (4 players = 4 teams).
 - 1v2/1v3 apply the correct HP bonus.
 - 1 human vs. 1 Normal bot is useful.
 - All guns/grenades behave; no collision/cooldown exploits.
 - Overheat ends stalls; draws replay.
 - Full 1v1 with cards completes; offers are hidden and host-validated.
-- Four players readable at 1280×720; 60 fps with VFX.
+- Four players readable at 1600×720; 60 fps with VFX.

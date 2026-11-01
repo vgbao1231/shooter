@@ -10,5 +10,6 @@ export * from "./physics";
 export * from "./protocol";
 export * from "./rng";
 export * from "./sim";
+export * from "./swing";
 export * from "./types";
 export * from "./world";

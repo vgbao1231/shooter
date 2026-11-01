@@ -1,9 +1,13 @@
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
+  TEAM_COLORS,
   WEAPONS,
+  type ArenaDefinition,
+  type ArenaPalette,
   type Platform,
   type PlayerState,
+  type SwingPlatform,
   type World,
 } from "@inkshot/sim";
 
@@ -40,15 +44,21 @@ const OUTLINE = "#0b0b12";
 export class ArenaRenderer {
   private readonly context: CanvasRenderingContext2D;
   private readonly mapCanvas: HTMLCanvasElement;
+  private readonly platforms: Platform[];
+  private readonly palette: ArenaPalette;
+  private readonly swings: SwingPlatform[];
   private readonly rigs = new Map<number, Rig>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly platforms: Platform[],
+    private readonly arena: ArenaDefinition,
   ) {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas 2D is not available");
     this.context = context;
+    this.platforms = arena.platforms;
+    this.palette = arena.palette;
+    this.swings = arena.swings ?? [];
     canvas.width = ARENA_WIDTH;
     canvas.height = ARENA_HEIGHT;
     this.mapCanvas = this.buildMap();
@@ -68,6 +78,8 @@ export class ArenaRenderer {
     context.fillStyle = INK;
     context.fillRect(-60, -60, ARENA_WIDTH + 120, ARENA_HEIGHT + 120);
     context.drawImage(this.mapCanvas, 0, 0);
+
+    this.drawSwings(world);
 
     for (const player of world.players) {
       this.updateRig(player, dt);
@@ -112,6 +124,47 @@ export class ArenaRenderer {
     context.globalCompositeOperation = "source-over";
   }
 
+  private drawSwings(world: World): void {
+    if (this.swings.length === 0) return;
+    const context = this.context;
+    for (let index = 0; index < this.swings.length; index += 1) {
+      const def = this.swings[index];
+      if (!def) continue;
+      const state = world.swingState[index];
+      const angle = state?.angle ?? 0;
+      const bob = state?.bob ?? 0;
+      const cx = def.anchorX + def.length * Math.sin(angle);
+      const cy = def.anchorY + def.length * Math.cos(angle) + bob;
+
+      // Rope from the anchor down to the block. A taut rope is a straight
+      // line; when the block is bumped the rope slackens (the block rises
+      // toward the anchor) and we draw a gentle downward sag so it reads as a
+      // real rope rather than a rigid rod.
+      const dist = Math.hypot(cx - def.anchorX, cy - def.anchorY);
+      const slack = Math.max(0, 1 - dist / def.length);
+      context.strokeStyle = "rgba(232,230,223,.32)";
+      context.lineWidth = 1.5;
+      context.beginPath();
+      context.moveTo(def.anchorX, def.anchorY);
+      if (slack > 0.02) {
+        const midX = (def.anchorX + cx) / 2;
+        const midY = (def.anchorY + cy) / 2;
+        const sag = slack * Math.min(50, def.length * 0.3);
+        context.quadraticCurveTo(midX, midY + sag, cx, cy);
+      } else {
+        context.lineTo(cx, cy);
+      }
+      context.stroke();
+
+      const x = cx - def.w / 2;
+      const y = cy - def.h / 2;
+      context.fillStyle = this.palette.blockB;
+      context.fillRect(x, y, def.w, def.h);
+      context.fillStyle = this.palette.blockEdge;
+      context.fillRect(x, y, def.w, 3);
+    }
+  }
+
   private buildMap(): HTMLCanvasElement {
     const map = document.createElement("canvas");
     map.width = ARENA_WIDTH;
@@ -126,12 +179,12 @@ export class ArenaRenderer {
     };
 
     const background = context.createLinearGradient(0, 0, 0, ARENA_HEIGHT);
-    background.addColorStop(0, "#14444b");
-    background.addColorStop(1, "#0a1b27");
+    background.addColorStop(0, this.palette.backgroundTop);
+    background.addColorStop(1, this.palette.backgroundBottom);
     context.fillStyle = background;
     context.fillRect(0, 0, ARENA_WIDTH, ARENA_HEIGHT);
 
-    context.fillStyle = "rgba(4,14,22,.16)";
+    context.fillStyle = this.palette.shadow;
     for (const platform of this.platforms) {
       if (platform.kind !== "block") continue;
       const shadowX = 170;
@@ -156,9 +209,9 @@ export class ArenaRenderer {
         continue;
       }
       if (platform.kind === "pillar") {
-        context.fillStyle = "#7a3f34";
+        context.fillStyle = this.palette.pillar;
         context.fillRect(platform.x, platform.y, platform.w, platform.h);
-        context.fillStyle = "rgba(0,0,0,.22)";
+        context.fillStyle = this.palette.pillarShade;
         context.fillRect(
           platform.x + platform.w * 0.62,
           platform.y,
@@ -174,8 +227,8 @@ export class ArenaRenderer {
         platform.x + platform.w,
         platform.y + platform.h,
       );
-      gradient.addColorStop(0, "#ff4f8b");
-      gradient.addColorStop(1, "#ff8a5b");
+      gradient.addColorStop(0, this.palette.blockA);
+      gradient.addColorStop(1, this.palette.blockB);
       context.fillStyle = gradient;
       context.fillRect(platform.x, platform.y, platform.w, platform.h);
 
@@ -188,8 +241,8 @@ export class ArenaRenderer {
       for (let index = 0; index < strokes; index += 1) {
         context.strokeStyle =
           random() < 0.5
-            ? "rgba(255,200,180,.18)"
-            : "rgba(120,20,60,.16)";
+            ? this.palette.blockStrokeA
+            : this.palette.blockStrokeB;
         context.lineWidth = 3 + random() * 9;
         const x = platform.x + random() * platform.w;
         const y = platform.y + random() * platform.h;
@@ -200,7 +253,7 @@ export class ArenaRenderer {
         context.stroke();
       }
       context.restore();
-      context.fillStyle = "rgba(255,230,210,.55)";
+      context.fillStyle = this.palette.blockEdge;
       context.fillRect(platform.x, platform.y, platform.w, 3);
     }
 
@@ -298,6 +351,23 @@ export class ArenaRenderer {
 
     context.save();
     if (!player.alive) context.globalAlpha = 0.8;
+
+    // Team marker: a colored ring on the ground so teammates read instantly.
+    if (world.teamCount > 1) {
+      context.strokeStyle = TEAM_COLORS[player.team] ?? "#fff";
+      context.lineWidth = 3;
+      context.beginPath();
+      context.ellipse(
+        player.x,
+        bodyY + radiusY + 2,
+        radiusX + 5,
+        radiusY * 0.55 + 3,
+        0,
+        0,
+        Math.PI * 2,
+      );
+      context.stroke();
+    }
 
     context.strokeStyle = color;
     context.lineWidth = 6;
@@ -530,11 +600,15 @@ export class ArenaRenderer {
       context.stroke();
     }
 
+    // Draw normal particles first, then switch to "lighter" once for all
+    // light (glowing) particles — switching globalCompositeOperation per
+    // particle is a real canvas cost when a buckshot blast fills the screen.
     for (const particle of world.particles) {
+      if (particle.light) continue;
       const alpha = Math.max(0, particle.life / particle.maxLife);
+      if (alpha <= 0.02) continue;
       context.globalAlpha = alpha;
       context.fillStyle = particle.color;
-      context.globalCompositeOperation = particle.light ? "lighter" : "source-over";
       if (particle.shard) {
         context.fillRect(particle.x, particle.y, particle.size, particle.size * 0.5);
       } else {
@@ -549,7 +623,27 @@ export class ArenaRenderer {
         context.fill();
       }
     }
-
+    context.globalCompositeOperation = "lighter";
+    for (const particle of world.particles) {
+      if (!particle.light) continue;
+      const alpha = Math.max(0, particle.life / particle.maxLife);
+      if (alpha <= 0.02) continue;
+      context.globalAlpha = alpha;
+      context.fillStyle = particle.color;
+      if (particle.shard) {
+        context.fillRect(particle.x, particle.y, particle.size, particle.size * 0.5);
+      } else {
+        context.beginPath();
+        context.arc(
+          particle.x,
+          particle.y,
+          particle.size * (0.4 + 0.6 * alpha),
+          0,
+          Math.PI * 2,
+        );
+        context.fill();
+      }
+    }
     context.globalCompositeOperation = "source-over";
     context.textAlign = "center";
     context.textBaseline = "middle";

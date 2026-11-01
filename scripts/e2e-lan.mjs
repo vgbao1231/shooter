@@ -1,12 +1,12 @@
 import { chromium } from "playwright";
 
 const LAN_HOST = "http://127.0.0.1:8080";
-const PAGE = "http://127.0.0.1:5173/?noPointerLock=1";
+const PAGE = "http://127.0.0.1:5173/";
 
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 
-async function connectClient(name) {
+async function openClient(name) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   page.on("console", (message) => {
@@ -18,22 +18,42 @@ async function connectClient(name) {
   await page.getByRole("button", { name: /^lan/i }).click();
   await page.waitForTimeout(200);
   await page.getByLabel("Your name").fill(name);
-  await page.getByRole("button", { name: /connect/i }).click();
-  await page.waitForSelector(".lobby__slots", { timeout: 8000 });
   return { context, page };
 }
 
-const host = await connectClient("Alpha");
-const guest = await connectClient("Beta");
+// Host creates a room and reads its code.
+const host = await openClient("Alpha");
+await host.page.getByRole("button", { name: /create room/i }).click();
+await host.page.waitForSelector(".lobby__teams", { timeout: 8000 });
+const roomCode = (
+  await host.page.locator(".lobby__room-code strong").textContent()
+)?.trim();
+if (!roomCode) throw new Error("No room code rendered");
+
+// Guest joins the same room by code.
+const guest = await openClient("Beta");
+await guest.page.getByLabel("Room code").fill(roomCode);
+await guest.page.getByRole("button", { name: /^join$/i }).click();
+await guest.page.waitForSelector(".lobby__teams", { timeout: 8000 });
 await host.page.waitForTimeout(300);
 await guest.page.waitForTimeout(300);
 
+// A third client opening the invite link must auto-join the same room (the
+// share link must resolve to the Colyseus host, not a dev origin).
+const link = (await host.page.locator(".lobby__room-link code").textContent())?.trim();
+if (!link) throw new Error("No invite link rendered");
+const linker = await openClient("Gamma");
+await linker.page.goto(link, { waitUntil: "networkidle" });
+await linker.page.waitForSelector(".lobby__teams", { timeout: 8000 });
+const linkJoined = await linker.page.locator(".lobby__team").count();
+if (linkJoined < 1) throw new Error("Guest opening the invite link did not reach the lobby");
+
 const lobbyState = async (page) =>
   page.evaluate(() => {
-    const slots = [...document.querySelectorAll(".lobby__slot")].map((node) =>
+    const teams = [...document.querySelectorAll(".lobby__team")].map((node) =>
       node.textContent?.trim(),
     );
-    return { slots, host: !!document.querySelector(".menu__start") };
+    return { teams, code: document.querySelector(".lobby__room-code strong")?.textContent?.trim() };
   });
 
 const hostLobby = await lobbyState(host.page);

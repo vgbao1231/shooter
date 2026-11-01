@@ -12,11 +12,19 @@ import type {
   BotBrain,
   BotDifficulty,
   CardId,
+  Platform,
   PlayerHud,
   PlayerState,
   RoundState,
   World,
 } from "./types";
+
+/** Collidable platforms: `frame` walls + walkable `block`s. `pillar` is a
+ *  visual backdrop (the dark pyramid body / scaffold posts) and never collides,
+ *  so a front walkway or a lane isn't blocked by a shadow shape. */
+function collidablePlatforms(platforms: Platform[]): Platform[] {
+  return platforms.filter((platform) => platform.kind !== "pillar");
+}
 
 export interface CreateWorldOptions {
   seed?: number;
@@ -26,6 +34,10 @@ export interface CreateWorldOptions {
   botEnabled?: boolean;
   botDifficulty?: BotDifficulty;
   matchTarget?: number;
+  /** Number of teams (default 1 = free-for-all). */
+  teamCount?: number;
+  /** Explicit team per player id (indexed by player id). Server-driven for LAN. */
+  playerTeams?: number[];
   /** Number of human-controlled players (default 1). LAN uses >1. */
   humanCount?: number;
   playerCards?: CardId[];
@@ -44,6 +56,7 @@ function createPlayer(
   color: string,
   spawn: { x: number; y: number },
   isBot: boolean,
+  team: number,
   skin = "default",
 ): PlayerState {
   return {
@@ -53,6 +66,7 @@ function createPlayer(
     color,
     isBot,
     botControlled: isBot,
+    team,
     x: spawn.x,
     y: spawn.y,
     vx: 0,
@@ -103,6 +117,16 @@ export function createWorld(options: CreateWorldOptions = {}): World {
     ...arena.spawns.bots,
   ];
   const humanCount = Math.max(1, options.humanCount ?? 1);
+  const teamCount = Math.max(1, options.teamCount ?? 1);
+
+  // Team for a player id: explicit assignment wins (server-driven), otherwise
+  // round-robin across teams (and 0 in free-for-all).
+  const teamFor = (id: number): number => {
+    if (options.playerTeams && options.playerTeams[id] !== undefined) {
+      return Math.max(0, Math.min(teamCount - 1, options.playerTeams[id] ?? 0));
+    }
+    return teamCount > 1 ? id % teamCount : 0;
+  };
 
   const humans: PlayerState[] = [];
   for (let index = 0; index < humanCount; index += 1) {
@@ -115,6 +139,7 @@ export function createWorld(options: CreateWorldOptions = {}): World {
         PLAYER_COLORS[index % PLAYER_COLORS.length] ?? "#4da3ff",
         spawn,
         false,
+        teamFor(index),
       ),
     );
   }
@@ -135,6 +160,7 @@ export function createWorld(options: CreateWorldOptions = {}): World {
         PLAYER_COLORS[(humanCount + index) % PLAYER_COLORS.length] ?? "#4da3ff",
         spawn,
         true,
+        teamFor(humanCount + index),
       ),
     );
   }
@@ -142,6 +168,8 @@ export function createWorld(options: CreateWorldOptions = {}): World {
   const seed = normalizeSeed(options.seed ?? 0x1234abcd);
   const mode = options.mode ?? "training";
   const matchTarget = Math.max(2, options.matchTarget ?? 3);
+  const swingDefs = arena.swings ?? [];
+  const swingState = swingDefs.map(() => ({ angle: 0, angVel: 0, bob: 0, bobVel: 0 }));
   return {
     tick: 0,
     time: 0,
@@ -151,7 +179,11 @@ export function createWorld(options: CreateWorldOptions = {}): World {
     mode,
     arenaId: arena.id,
     players: [...humans, ...bots],
-    platformList: arena.platforms,
+    platformList: collidablePlatforms(arena.platforms),
+    staticPlatforms: collidablePlatforms(arena.platforms),
+    swingDefs,
+    swingState,
+    swingRects: [],
     bullets: [],
     grenades: [],
     particles: [],
@@ -172,6 +204,9 @@ export function createWorld(options: CreateWorldOptions = {}): World {
     roundNumber: 1,
     matchTarget,
     matchOver: false,
+    teamCount,
+    teamScores: Array.from({ length: teamCount }, () => 0),
+    cardPick: null,
   };
 }
 
@@ -322,6 +357,7 @@ export function startMatchRound(world: World): void {
 /** Reset an entire match: scores, round number, and round state. */
 export function resetMatch(world: World): void {
   for (const player of world.players) player.score = 0;
+  world.teamScores = world.teamScores.map(() => 0);
   world.roundNumber = 1;
   world.matchOver = false;
   world.roundState = "countdown";
@@ -350,5 +386,6 @@ export function toPlayerHud(player: PlayerState): PlayerHud {
     y: player.y,
     skin: player.skin,
     score: player.score,
+    team: player.team,
   };
 }

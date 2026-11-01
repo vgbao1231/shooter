@@ -14,7 +14,9 @@ pnpm check:e2e    # browser smoke test while `pnpm dev` is running
 pnpm check:e2e:lan  # 2-browser LAN flow while `pnpm dev` (5173) + `pnpm host` (8080) run
 ```
 
-Controls: `A/D` move · `Space` jump · into wall + hold jump to climb · mouse aim · LMB shoot · RMB/`G` grenade · `1/2/3` guns · `C` cards · `R` reset · `F1` debug.
+Controls: `A/D` move · `Space` jump · into wall + hold jump to climb · mouse aim (no pointer lock) · LMB shoot · RMB/`G` grenade · `C` cards · `R` reset · `Esc` pause/settings · `F1` debug.
+
+Modes: **Training** (1v1 bot sandbox) · **Vượt ải / Bot Gauntlet** (level-select, escalating difficulty) · **LAN** (2–4 browsers on one network, host controls). Both arenas are 1600×720 with distinct layouts + palettes and a map preview before you start.
 
 See `docs/README.md` for design, art direction, architecture, roadmap, and LAN run instructions. The first client to join the LAN room is the host.
 

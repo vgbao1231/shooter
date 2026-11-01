@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   ARENAS,
   ARENA_ORDER,
+  CARD_BY_ID,
+  getArena,
+  TEAM_COLORS,
   type BotDifficulty,
   type CardId,
   type CardSpec,
@@ -10,17 +14,19 @@ import {
   type LobbyState,
   type MatchEvent,
   type MatchStart,
+  type CardPickMessage,
 } from "@inkshot/sim";
 import type { GameHandle } from "./game/GameRuntime";
-import { LanSession } from "./game/LanSession";
+import { defaultServerAddr, LanSession, roomCodeFromLocation } from "./game/LanSession";
+import { ArenaPreview } from "./ui/ArenaPreview";
 import { CardOverlay } from "./ui/CardOverlay";
 import { DeckPanel } from "./ui/DeckPanel";
 import { GameCanvas } from "./ui/GameCanvas";
 import { Hud } from "./ui/Hud";
 import { LanGame } from "./ui/LanGame";
 
-type Screen = "menu" | "game" | "lan-lobby";
-type Mode = "training" | "gauntlet" | "match" | "lan";
+type Screen = "menu" | "game" | "lan-lobby" | "level-select";
+type Mode = "training" | "gauntlet" | "lan";
 
 const SKIN_UNLOCKS = [
   { wave: 3, id: "gold", name: "Gold" },
@@ -34,6 +40,25 @@ const SKIN_COLORS: Record<string, string> = {
   ink: "#c78bff",
 };
 
+interface LevelDef {
+  id: number;
+  arenaId: string;
+  botCount: number;
+  botDifficulty: BotDifficulty;
+  wave: number;
+}
+
+// Temporary: every level is playable. Difficulty scales with the level so the
+// gauntlet ramps up, and the two arenas alternate.
+const LEVELS: LevelDef[] = [
+  { id: 1, arenaId: "proving-grounds", botCount: 1, botDifficulty: "easy", wave: 1 },
+  { id: 2, arenaId: "skyline", botCount: 1, botDifficulty: "normal", wave: 2 },
+  { id: 3, arenaId: "proving-grounds", botCount: 2, botDifficulty: "normal", wave: 3 },
+  { id: 4, arenaId: "skyline", botCount: 2, botDifficulty: "hard", wave: 4 },
+  { id: 5, arenaId: "proving-grounds", botCount: 3, botDifficulty: "hard", wave: 5 },
+  { id: 6, arenaId: "skyline", botCount: 3, botDifficulty: "hard", wave: 6 },
+];
+
 export default function App() {
   const gameRef = useRef<GameHandle>(null);
   const [screen, setScreen] = useState<Screen>("menu");
@@ -43,21 +68,41 @@ export default function App() {
   const [cardsOpen, setCardsOpen] = useState(false);
   const [offers, setOffers] = useState<CardSpec[]>([]);
   const [debug, setDebug] = useState(false);
+  const [paused, setPaused] = useState(false);
 
-  // Match options.
+  // Match options (training + gauntlet).
   const [botCount, setBotCount] = useState(1);
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>("normal");
   const [matchTarget, setMatchTarget] = useState(3);
 
   // LAN (Phase 3).
   const lanRef = useRef<LanSession | null>(null);
-  const [lanAddr, setLanAddr] = useState("http://localhost:8080");
   const [lanName, setLanName] = useState("YOU");
+  const [lanJoinCode, setLanJoinCode] = useState("");
   const [lanLobby, setLanLobby] = useState<LobbyState | null>(null);
   const [lanMatchStart, setLanMatchStart] = useState<MatchStart | null>(null);
   const [lanError, setLanError] = useState<string | null>(null);
   const [lanConnecting, setLanConnecting] = useState(false);
   const [lanMatchOver, setLanMatchOver] = useState(false);
+  const [copied, setCopied] = useState(false);
+  // Loser-picks-card overlay (a scored 1v1 round ended; the loser chooses).
+  const [lanCardPick, setLanCardPick] = useState<CardPickMessage | null>(null);
+  const [lanCardDeadline, setLanCardDeadline] = useState<number | null>(null);
+  const [lanCardSeconds, setLanCardSeconds] = useState(0);
+
+  useEffect(() => {
+    if (lanCardDeadline === null) return;
+    const tick = (): void => {
+      const remaining = Math.max(0, Math.ceil((lanCardDeadline - Date.now()) / 1000));
+      setLanCardSeconds(remaining);
+      if (remaining <= 0) {
+        setLanCardDeadline(null);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [lanCardDeadline]);
 
   const [wave, setWave] = useState(1);
   const [coins, setCoins] = useState(0);
@@ -73,7 +118,6 @@ export default function App() {
   };
 
   const toggleCards = (): void => {
-    if (mode === "match") return; // cards are a sandbox/gauntlet tool in Phase 2
     if (cardsOpen) {
       closeCards();
       return;
@@ -90,7 +134,13 @@ export default function App() {
     closeCards();
   };
 
-  const startGame = (): void => {
+  // LAN loser-picks-card: send the choice; the overlay clears when the server
+  // confirms (or auto-picks after the timeout).
+  const pickLanCard = (cardId: CardId): void => {
+    lanRef.current?.pickCard(cardId);
+  };
+
+  const resetGauntletState = (): void => {
     setCoins(0);
     setWave(1);
     setGameOver(false);
@@ -98,16 +148,78 @@ export default function App() {
     setWaveClearedHandled(false);
     setUnlockedSkins([]);
     setEquippedSkin("default");
+  };
+
+  const startTraining = (): void => {
+    setMode("training");
+    setBotCount(1);
+    setBotDifficulty("normal");
+    resetGauntletState();
+    setPaused(false);
+    setScreen("game");
+  };
+
+  const startLevel = (level: LevelDef): void => {
+    setMode("gauntlet");
+    setArenaId(level.arenaId);
+    setBotCount(level.botCount);
+    setBotDifficulty(level.botDifficulty);
+    setWave(level.wave);
+    setCoins(0);
+    setGameOver(false);
+    setShopOpen(false);
+    setWaveClearedHandled(false);
+    setUnlockedSkins([]);
+    setEquippedSkin("default");
+    setPaused(false);
     setScreen("game");
   };
 
   const backToMenu = (): void => {
+    gameRef.current?.pause(false);
+    setPaused(false);
     setScreen("menu");
     setCardsOpen(false);
     setShopOpen(false);
     setGameOver(false);
     setHud(null);
   };
+
+  // Esc → pause/settings overlay (local modes). Cards/shop/game-over handle
+  // their own keys and keep this listener quiet.
+  useEffect(() => {
+    if (screen !== "game" || mode === "lan" || cardsOpen || shopOpen || gameOver) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code === "Escape") {
+        event.preventDefault();
+        const next = !paused;
+        setPaused(next);
+        gameRef.current?.pause(next);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [screen, mode, paused, cardsOpen, shopOpen, gameOver]);
+
+  // Esc leaves the LAN room: back out of the lobby or an in-progress match
+  // (same as the Menu button). Without this, Esc was a no-op in LAN mode and
+  // a host had no way to exit mid-room except clicking the on-screen Menu.
+  useEffect(() => {
+    if (mode !== "lan") return;
+    if (screen !== "game" && screen !== "lan-lobby") return;
+    if (lanCardPick) return; // let the card-pick overlay handle its own flow
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code === "Escape") {
+        event.preventDefault();
+        disconnectLan();
+        setScreen("menu");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mode, screen, lanCardPick]);
 
   useEffect(() => {
     if (!cardsOpen) return;
@@ -162,10 +274,6 @@ export default function App() {
     gameRef.current?.startWave(1);
   };
 
-  const rematch = (): void => {
-    gameRef.current?.resetMatch();
-  };
-
   const disconnectLan = (): void => {
     lanRef.current?.disconnect();
     lanRef.current = null;
@@ -177,10 +285,15 @@ export default function App() {
     setHud(null);
   };
 
-  const connectLan = async (): Promise<void> => {
-    const addr = lanAddr.trim() || "http://localhost:8080";
+  const connectLan = async (joinCode?: string): Promise<void> => {
+    const addr = defaultServerAddr();
     const name = lanName.trim() || "YOU";
+    const code = joinCode?.trim().toUpperCase() || "";
     if (lanConnecting) return;
+    // The game screen mounts `LanGame` only when `mode === "lan"`. A guest who
+    // joins via share link (auto-join) or code never clicked the LAN menu tab,
+    // so without this the match would render the local training sim instead.
+    setMode("lan");
     setLanConnecting(true);
     setLanError(null);
     const session = new LanSession({
@@ -193,6 +306,15 @@ export default function App() {
       onMatchEvent: (event) => {
         if (event.type === "matchEnd") setLanMatchOver(true);
       },
+      onCardPick: (message) => {
+        if (message.phase === "offer") {
+          setLanCardPick(message);
+          setLanCardDeadline(message.timeout ? Date.now() + message.timeout * 1000 : null);
+        } else {
+          setLanCardPick(null);
+          setLanCardDeadline(null);
+        }
+      },
       onError: (message) => setLanError(message),
       onClose: (reason) => {
         if (lanRef.current === session) {
@@ -204,20 +326,55 @@ export default function App() {
     });
     lanRef.current = session;
     try {
-      await session.connect(addr, name);
+      await Promise.race([
+        session.connect(addr, name, code || undefined),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Timed out connecting to the LAN host — is `pnpm host` running?")),
+            10_000,
+          ),
+        ),
+      ]);
       setScreen("lan-lobby");
     } catch (error) {
-      setLanError(error instanceof Error ? error.message : "Connection failed");
+      const message = error instanceof Error ? error.message : "Connection failed";
+      setLanError(
+        /ROOM_CODE_TAKEN/.test(message)
+          ? "Room code is taken — create a new room."
+          : /no rooms found/i.test(message)
+            ? "No room with that code — check the code and try again."
+            : message,
+      );
       disconnectLan();
     } finally {
       setLanConnecting(false);
     }
   };
 
+  // Visiting a share link like `http://host:8080/QH3Z5` auto-joins that room.
+  const autoJoined = useRef(false);
+  useEffect(() => {
+    if (autoJoined.current) return;
+    autoJoined.current = true;
+    const code = roomCodeFromLocation(window.location);
+    if (!code) return;
+    void connectLan(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const lanIsHost = lanLobby?.hostId !== null && lanRef.current?.isHost === true;
 
   const updateLanConfig = (patch: Partial<LobbyConfig>): void => {
     lanRef.current?.setConfig(patch);
+  };
+
+  const roomLink = lanLobby?.code ? `${window.location.origin}/${lanLobby.code}` : "";
+  const copyRoomLink = (): void => {
+    if (!roomLink) return;
+    void navigator.clipboard.writeText(roomLink).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    });
   };
 
   const buyUpgrade = (cardId: CardId, cost: number): void => {
@@ -233,6 +390,43 @@ export default function App() {
   };
 
   const owned = hud?.player.cards ?? [];
+
+  if (screen === "level-select") {
+    return (
+      <main className="menu">
+        <div className="menu__inner">
+          <p className="menu__eyebrow">Vượt ải · Bot Gauntlet</p>
+          <h1 className="menu__title">CHỌN ẢI</h1>
+          <p className="menu__sub">
+            Độ khó tăng dần theo ải. Tạm thời mọi ải đều mở để chơi.
+          </p>
+
+          <div className="level-grid">
+            {LEVELS.map((level) => {
+              const arena = getArena(level.arenaId);
+              return (
+                <button
+                  key={level.id}
+                  className="level-card"
+                  onClick={() => startLevel(level)}
+                >
+                  <ArenaPreview arenaId={level.arenaId} className="level-card__preview" />
+                  <strong>Ải {level.id}</strong>
+                  <span className="level-card__meta">
+                    {arena.name} · {level.botCount} bot · {level.botDifficulty}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <button className="ghost-button" onClick={() => setScreen("menu")}>
+            Back to menu
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (screen === "menu") {
     return (
@@ -253,18 +447,11 @@ export default function App() {
               <span>1v1 bot sandbox · cards · feel-testing</span>
             </button>
             <button
-              className={`menu__mode ${mode === "match" ? "is-active" : ""}`}
-              onClick={() => setMode("match")}
-            >
-              <strong>Match</strong>
-              <span>Rounds · first-to-N · bot difficulty · 1vN</span>
-            </button>
-            <button
               className={`menu__mode ${mode === "gauntlet" ? "is-active" : ""}`}
               onClick={() => setMode("gauntlet")}
             >
-              <strong>Bot Gauntlet</strong>
-              <span>Waves · earn coins · upgrades · unlock skins</span>
+              <strong>Vượt ải</strong>
+              <span>Waves · pick a level · earn coins · unlock skins</span>
             </button>
             <button
               className={`menu__mode ${mode === "lan" ? "is-active" : ""}`}
@@ -275,65 +462,14 @@ export default function App() {
             </button>
           </div>
 
-          {mode === "match" ? (
-            <div className="menu__match">
-              <div className="menu__match-row">
-                <span className="menu__label">Bots</span>
-                <div className="menu__arena-row">
-                  {[1, 2, 3].map((count) => (
-                    <button
-                      key={count}
-                      className={`menu__arena-option ${botCount === count ? "is-active" : ""}`}
-                      onClick={() => setBotCount(count)}
-                    >
-                      1v{count}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="menu__match-row">
-                <span className="menu__label">Difficulty</span>
-                <div className="menu__arena-row">
-                  {(["easy", "normal", "hard"] as const).map((level) => (
-                    <button
-                      key={level}
-                      className={`menu__arena-option ${botDifficulty === level ? "is-active" : ""}`}
-                      onClick={() => setBotDifficulty(level)}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="menu__match-row">
-                <span className="menu__label">First to</span>
-                <div className="menu__arena-row">
-                  {[3, 5].map((target) => (
-                    <button
-                      key={target}
-                      className={`menu__arena-option ${matchTarget === target ? "is-active" : ""}`}
-                      onClick={() => setMatchTarget(target)}
-                    >
-                      {target}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {mode === "gauntlet" ? (
+            <button className="menu__start" onClick={() => setScreen("level-select")}>
+              Choose a level
+            </button>
           ) : null}
 
           {mode === "lan" ? (
             <div className="menu__lan">
-              <div className="menu__match-row">
-                <span className="menu__label">Host</span>
-                <input
-                  className="menu__input"
-                  value={lanAddr}
-                  onChange={(event) => setLanAddr(event.target.value)}
-                  placeholder="http://192.168.1.10:8080"
-                  aria-label="LAN host address"
-                />
-              </div>
               <div className="menu__match-row">
                 <span className="menu__label">Name</span>
                 <input
@@ -351,13 +487,38 @@ export default function App() {
                 onClick={() => void connectLan()}
                 disabled={lanConnecting}
               >
-                {lanConnecting ? "Connecting…" : "Connect"}
+                {lanConnecting ? "Connecting…" : "Create room"}
               </button>
+              <div className="menu__lan-divider">
+                <span>or</span>
+              </div>
+              <div className="menu__match-row">
+                <span className="menu__label">Join room</span>
+                <div className="menu__lan-join">
+                  <input
+                    className="menu__input menu__input--code"
+                    value={lanJoinCode}
+                    onChange={(event) => setLanJoinCode(event.target.value.toUpperCase())}
+                    placeholder="QH3Z5"
+                    maxLength={8}
+                    aria-label="Room code"
+                  />
+                  <button
+                    className="menu__lan-join-button"
+                    onClick={() => void connectLan(lanJoinCode)}
+                    disabled={lanConnecting || !lanJoinCode.trim()}
+                  >
+                    Join
+                  </button>
+                </div>
+              </div>
               <p className="menu__hint">
-                The first client in the room is the host. Everyone joins the same address.
+                Create a room to get a code + share link, or enter a friend's code to join.
               </p>
             </div>
-          ) : (
+          ) : null}
+
+          {mode === "training" ? (
             <>
               <div className="menu__arena">
                 <span className="menu__label">Arena</span>
@@ -376,14 +537,15 @@ export default function App() {
                     );
                   })}
                 </div>
+                <ArenaPreview arenaId={arenaId} className="menu__arena-preview" />
               </div>
 
-              <button className="menu__start" onClick={startGame}>
-                Start {mode === "gauntlet" ? "Gauntlet" : mode === "match" ? "Match" : "Training"}
+              <button className="menu__start" onClick={startTraining}>
+                Start Training
               </button>
-              <p className="menu__hint">Click the arena to lock the mouse · Esc releases it</p>
+              <p className="menu__hint">Aim with the mouse · Esc pauses · no pointer lock</p>
             </>
-          )}
+          ) : null}
         </div>
       </main>
     );
@@ -392,123 +554,255 @@ export default function App() {
   if (screen === "lan-lobby") {
     const lobby = lanLobby;
     const config = lobby?.config;
+    const teams = config?.teams ?? 2;
+    const roomSession = lanRef.current?.roomSessionId ?? null;
+    const mySlot = lobby?.slots.find((slot) => slot.sessionId === roomSession) ?? null;
+    const botTeams = config?.botTeams ?? [];
+    const botTotal = botTeams.reduce((sum, count) => sum + count, 0);
+    const humansCount = (lobby?.slots ?? []).filter((slot) => slot.sessionId).length;
+    const totalPlayers = humansCount + botTotal;
+    const addBot = (team: number): void => {
+      updateLanConfig({
+        botTeams: botTeams.map((count, index) => (index === team ? count + 1 : count)),
+      });
+    };
+    const removeBot = (team: number): void => {
+      updateLanConfig({
+        botTeams: botTeams.map((count, index) =>
+          index === team ? Math.max(0, count - 1) : count,
+        ),
+      });
+    };
     return (
       <main className="menu">
-        <div className="menu__inner">
+        <div className="menu__inner menu__inner--wide">
           <p className="menu__eyebrow">LAN · same network</p>
           <h1 className="menu__title">LOBBY</h1>
           {lanError ? <p className="menu__lan-error">{lanError}</p> : null}
+          {!lanLobby && !lanError ? (
+            <p className="menu__hint">Waiting for the lobby…</p>
+          ) : null}
 
-          <div className="lobby__slots">
-            {(lobby?.slots ?? []).map((slot) => {
-              const occupied = Boolean(slot.sessionId);
-              const isHost = slot.sessionId === lobby?.hostId;
-              return (
-                <div
-                  key={slot.index}
-                  className={`lobby__slot ${occupied ? "" : "is-empty"}`}
-                >
-                  <span className="lobby__slot-index">{slot.index + 1}</span>
-                  <strong>{slot.sessionId ? slot.name : "Open slot"}</strong>
-                  <span className="lobby__slot-tags">
-                    {isHost ? <em className="lobby__tag">HOST</em> : null}
-                    {occupied && !isHost ? <em className="lobby__tag">YOU</em> : null}
-                    {occupied && slot.ready ? (
-                      <em className="lobby__tag is-ready">READY</em>
-                    ) : null}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          {lanIsHost && config ? (
-            <div className="menu__match">
-              <div className="menu__match-row">
-                <span className="menu__label">Bots</span>
-                <div className="menu__arena-row">
-                  {[0, 1, 2, 3].map((count) => (
-                    <button
-                      key={count}
-                      className={`menu__arena-option ${config.botCount === count ? "is-active" : ""}`}
-                      onClick={() => updateLanConfig({ botCount: count })}
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
+          {lanLobby?.code ? (
+            <div className="lobby__room">
+              <div className="lobby__room-code" title="Room code">
+                <span className="menu__label">Room code</span>
+                <strong>{lanLobby.code}</strong>
               </div>
-              <div className="menu__match-row">
-                <span className="menu__label">Difficulty</span>
-                <div className="menu__arena-row">
-                  {(["easy", "normal", "hard"] as const).map((level) => (
-                    <button
-                      key={level}
-                      className={`menu__arena-option ${config.botDifficulty === level ? "is-active" : ""}`}
-                      onClick={() => updateLanConfig({ botDifficulty: level })}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
+              <div className="lobby__room-link">
+                <span className="menu__label">Invite link</span>
+                <code>{roomLink}</code>
               </div>
-              <div className="menu__match-row">
-                <span className="menu__label">First to</span>
-                <div className="menu__arena-row">
-                  {[3, 5].map((target) => (
-                    <button
-                      key={target}
-                      className={`menu__arena-option ${config.matchTarget === target ? "is-active" : ""}`}
-                      onClick={() => updateLanConfig({ matchTarget: target })}
-                    >
-                      {target}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="menu__match-row">
-                <span className="menu__label">Arena</span>
-                <div className="menu__arena-row">
-                  {ARENA_ORDER.map((id) => {
-                    const arena = ARENAS[id];
-                    if (!arena) return null;
-                    return (
-                      <button
-                        key={id}
-                        className={`menu__arena-option ${config.arenaId === id ? "is-active" : ""}`}
-                        onClick={() => updateLanConfig({ arenaId: id })}
-                      >
-                        {arena.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <button className="menu__start" onClick={() => lanRef.current?.startMatch()}>
-                Start match
-              </button>
-            </div>
-          ) : (
-            <div className="menu__match">
               <button
-                className="menu__start"
-                onClick={() =>
-                  lanRef.current?.setReady(
-                    !(lanLobby?.slots.find(
-                      (slot) => slot.sessionId === lanRef.current?.roomSessionId,
-                    )?.ready ?? false),
-                  )
-                }
+                className="menu-button"
+                onClick={copyRoomLink}
+                disabled={!roomLink}
               >
-                {lanLobby?.slots.find(
-                  (slot) => slot.sessionId === lanRef.current?.roomSessionId,
-                )?.ready
-                  ? "Unready"
-                  : "Ready"}
+                {copied ? "Copied!" : "Copy link"}
               </button>
-              <p className="menu__hint">Waiting for the host to start.</p>
             </div>
-          )}
+          ) : null}
+
+          <div className="lobby__grid">
+            {/* Left: pick a side — team columns with host add-bot per team. */}
+            <section className="lobby__col lobby__col--teams">
+              <div className="lobby__col-head">
+                <span className="menu__label">Pick your side</span>
+                {lanIsHost ? (
+                  <div className="lobby__seg" aria-label="Team count">
+                    {[2, 3, 4].map((count) => (
+                      <button
+                        key={count}
+                        className={config?.teams === count ? "is-active" : ""}
+                        onClick={() => updateLanConfig({ teams: count })}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="lobby__teams">
+                {Array.from({ length: teams }, (_, team) => {
+                  const members = (lobby?.slots ?? []).filter(
+                    (slot) => slot.team === team && slot.sessionId,
+                  );
+                  const selected = mySlot?.team === team;
+                  const bots = botTeams[team] ?? 0;
+                  const full = totalPlayers >= 4;
+                  return (
+                    <div
+                      key={team}
+                      className={`lobby__team ${selected ? "is-selected" : ""}`}
+                      style={{ "--team-color": TEAM_COLORS[team] ?? "#fff" } as CSSProperties}
+                    >
+                      <button
+                        className="lobby__team-join"
+                        onClick={() => lanRef.current?.setTeam(team)}
+                        title={`Join team ${team + 1}`}
+                      >
+                        <span className="lobby__team-name">TEAM {team + 1}</span>
+                        <span className="lobby__team-members">
+                          {members.length === 0 ? (
+                            <em>Empty — click to join</em>
+                          ) : (
+                            members.map((slot) => (
+                              <span key={slot.index} className="lobby__member">
+                                {slot.sessionId === lobby?.hostId ? "★ " : ""}
+                                {slot.name}
+                              </span>
+                            ))
+                          )}
+                        </span>
+                      </button>
+                      <div className="lobby__team-bots">
+                        {Array.from({ length: bots }, (_, botIndex) => (
+                          <span key={botIndex} className="lobby__bot-chip">
+                            BOT
+                            {lanIsHost ? (
+                              <button
+                                className="lobby__bot-remove"
+                                onClick={() => removeBot(team)}
+                                aria-label={`Remove bot from team ${team + 1}`}
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </span>
+                        ))}
+                        {lanIsHost ? (
+                          <button
+                            className="lobby__bot-add"
+                            onClick={() => addBot(team)}
+                            disabled={full}
+                            title={full ? "Room is full" : `Add a bot to team ${team + 1}`}
+                          >
+                            + Add bot
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Right: match setup (styled like the reference lobby panel). */}
+            <section className="lobby__col lobby__col--setup">
+              <div className="lobby__setup">
+                <ArenaPreview
+                  arenaId={config?.arenaId ?? "proving-grounds"}
+                  className="lobby__setup-preview"
+                />
+                <span className="lobby__setup-title">MATCH SETUP</span>
+                <div className="lobby__setup-grid">
+                  <div className="lobby__setup-item">
+                    <span className="lobby__setup-label">GAME MODE</span>
+                    <strong className="lobby__setup-value">{teams} teams</strong>
+                  </div>
+                  <div className="lobby__setup-item">
+                    <span className="lobby__setup-label">ARENA</span>
+                    {lanIsHost ? (
+                      <select
+                        className="lobby__select"
+                        value={config?.arenaId ?? "proving-grounds"}
+                        onChange={(event) => updateLanConfig({ arenaId: event.target.value })}
+                        aria-label="Arena"
+                      >
+                        {ARENA_ORDER.map((id) => {
+                          const arena = ARENAS[id];
+                          return arena ? (
+                            <option key={id} value={id}>
+                              {arena.name}
+                            </option>
+                          ) : null;
+                        })}
+                      </select>
+                    ) : (
+                      <strong className="lobby__setup-value">
+                        {getArena(config?.arenaId ?? "proving-grounds").name}
+                      </strong>
+                    )}
+                  </div>
+                  <div className="lobby__setup-item">
+                    <span className="lobby__setup-label">FIRST TO</span>
+                    {lanIsHost ? (
+                      <div className="lobby__seg">
+                        {[3, 5].map((target) => (
+                          <button
+                            key={target}
+                            className={config?.matchTarget === target ? "is-active" : ""}
+                            onClick={() => updateLanConfig({ matchTarget: target })}
+                          >
+                            {target}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <strong className="lobby__setup-value">{config?.matchTarget ?? 3}</strong>
+                    )}
+                  </div>
+                  <div className="lobby__setup-item">
+                    <span className="lobby__setup-label">BOTS</span>
+                    <strong className="lobby__setup-value">{botTotal}</strong>
+                  </div>
+                </div>
+
+                <div className="lobby__setup-players">
+                  <span className="lobby__setup-title">CONNECTED PLAYERS</span>
+                  <div className="lobby__player-grid">
+                    {(lobby?.slots ?? [])
+                      .filter((slot) => slot.sessionId)
+                      .map((slot) => (
+                        <span key={slot.index} className="lobby__player-chip">
+                          <i
+                            className="lobby__player-dot"
+                            style={{ background: TEAM_COLORS[slot.team] ?? "#fff" }}
+                          />
+                          {slot.sessionId === lobby?.hostId ? "★ " : ""}
+                          {slot.name}
+                          {slot.sessionId === roomSession ? " (you)" : ""}
+                        </span>
+                      ))}
+                    {Array.from({ length: teams }, (_, team) =>
+                      Array.from({ length: botTeams[team] ?? 0 }, (_, botIndex) => (
+                        <span key={`${team}-${botIndex}`} className="lobby__player-chip">
+                          <i
+                            className="lobby__player-dot"
+                            style={{ background: TEAM_COLORS[team] ?? "#fff" }}
+                          />
+                          BOT
+                        </span>
+                      )),
+                    )}
+                  </div>
+                </div>
+
+                {lanIsHost ? (
+                  <button className="lobby__join" onClick={() => lanRef.current?.startMatch()}>
+                    START MATCH
+                  </button>
+                ) : (
+                  <button
+                    className="lobby__join"
+                    onClick={() =>
+                      lanRef.current?.setReady(
+                        !(lanLobby?.slots.find(
+                          (slot) => slot.sessionId === lanRef.current?.roomSessionId,
+                        )?.ready ?? false),
+                      )
+                    }
+                  >
+                    {lanLobby?.slots.find(
+                      (slot) => slot.sessionId === lanRef.current?.roomSessionId,
+                    )?.ready
+                      ? "UNREADY"
+                      : "READY"}
+                  </button>
+                )}
+              </div>
+            </section>
+          </div>
 
           <button className="menu-button" onClick={() => { disconnectLan(); setScreen("menu"); }}>
             Leave lobby
@@ -531,7 +825,7 @@ export default function App() {
         ) : (
           <GameCanvas
             ref={gameRef}
-            mode={mode as "training" | "gauntlet" | "match"}
+            mode={mode as "training" | "gauntlet"}
             arenaId={arenaId}
             botCount={botCount}
             botDifficulty={botDifficulty}
@@ -546,8 +840,8 @@ export default function App() {
           <DeckPanel
             owned={owned}
             visible={
-              mode === "match" || mode === "lan"
-                ? false // cards are not a LAN/match tool in Phase 3
+              mode === "lan"
+                ? false // cards are not a LAN tool in Phase 3
                 : mode === "training"
                   ? true
                   : !shopOpen && !gameOver
@@ -555,19 +849,63 @@ export default function App() {
           />
         ) : null}
 
-        <button
-          className="menu-button"
-          onClick={() => {
-            if (mode === "lan") {
-              disconnectLan();
-              setScreen("menu");
-            } else {
-              backToMenu();
-            }
-          }}
-        >
-          Menu
-        </button>
+        {!paused ? (
+          <button
+            className="menu-button"
+            onClick={() => {
+              if (mode === "lan") {
+                disconnectLan();
+                setScreen("menu");
+              } else {
+                backToMenu();
+              }
+            }}
+          >
+            Menu
+          </button>
+        ) : null}
+
+        {paused && hud ? (
+          <div className="pause-overlay" role="dialog" aria-modal="true">
+            <div className="pause-overlay__box">
+              <span className="eyebrow">Paused</span>
+              <h2>Settings</h2>
+              <button
+                className="menu__start"
+                onClick={() => {
+                  setPaused(false);
+                  gameRef.current?.pause(false);
+                }}
+              >
+                Resume
+              </button>
+              <button
+                className="ghost-button"
+                onClick={() => {
+                  gameRef.current?.pause(false);
+                  backToMenu();
+                }}
+              >
+                Menu
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {lanCardPick?.phase === "offer" &&
+        lanCardPick.playerId === lanRef.current?.myPlayerId ? (
+          <CardOverlay
+            mode="loser"
+            offers={(lanCardPick.offers ?? [])
+              .map((id) => CARD_BY_ID.get(id))
+              .filter((card): card is CardSpec => Boolean(card))}
+            owned={[]}
+            onPick={pickLanCard}
+            onReroll={() => undefined}
+            onClose={() => undefined}
+            secondsLeft={lanCardSeconds}
+          />
+        ) : null}
 
         {cardsOpen && hud ? (
           <CardOverlay
@@ -664,56 +1002,19 @@ export default function App() {
           </div>
         ) : null}
 
-        {mode === "match" && hud?.matchOver ? (
-          <div className="gameover-overlay">
-            <span className="eyebrow">Match over</span>
-            <h2>{hud.player.score > hud.bot.score ? "You win" : "Bots win"}</h2>
-            <p>
-              {hud.player.score} – {hud.bot.score} · first to {hud.matchTarget}
-            </p>
-            <div className="gameover-overlay__actions">
-              <button className="menu__start" onClick={rematch}>
-                Rematch
-              </button>
-              <button className="ghost-button" onClick={backToMenu}>
-                Menu
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         {mode === "lan" && hud?.matchOver ? (
-          <div className="gameover-overlay">
-            <span className="eyebrow">Match over</span>
-            <h2>{hud.player.score > hud.bot.score ? "You win" : "Opponent wins"}</h2>
-            <p>
-              {hud.player.score} – {hud.bot.score} · first to {hud.matchTarget}
-            </p>
-            <div className="gameover-overlay__actions">
-              {lanIsHost ? (
-                <button
-                  className="menu__start"
-                  onClick={() => {
-                    setLanMatchOver(false);
-                    lanRef.current?.rematch();
-                  }}
-                >
-                  Rematch
-                </button>
-              ) : (
-                <p className="menu__hint">Waiting for the host to rematch…</p>
-              )}
-              <button
-                className="ghost-button"
-                onClick={() => {
-                  disconnectLan();
-                  setScreen("menu");
-                }}
-              >
-                Menu
-              </button>
-            </div>
-          </div>
+          <LanMatchOverlay
+            hud={hud}
+            lanIsHost={lanIsHost}
+            onRematch={() => {
+              setLanMatchOver(false);
+              lanRef.current?.rematch();
+            }}
+            onMenu={() => {
+              disconnectLan();
+              setScreen("menu");
+            }}
+          />
         ) : null}
       </div>
     </main>
@@ -740,6 +1041,58 @@ function ShopItem({
       <button className="ghost-button" disabled={disabled} onClick={onBuy}>
         {disabled ? "Owned / low coins" : `${cost} coins`}
       </button>
+    </div>
+  );
+}
+
+function LanMatchOverlay({
+  hud,
+  lanIsHost,
+  onRematch,
+  onMenu,
+}: {
+  hud: HudState;
+  lanIsHost: boolean;
+  onRematch: () => void;
+  onMenu: () => void;
+}) {
+  const isTeam = hud.teamCount > 1;
+  let headline: string;
+  let scoreLine: string;
+  if (isTeam) {
+    const myTeam = hud.player.team;
+    const myScore = hud.teamScores[myTeam] ?? 0;
+    const bestOther = Math.max(
+      ...Object.entries(hud.teamScores)
+        .filter(([team]) => Number(team) !== myTeam)
+        .map(([, score]) => score),
+      0,
+    );
+    const won = myScore > bestOther;
+    headline = won ? "Your team wins" : "Enemy team wins";
+    scoreLine = `${myScore} – ${bestOther} · first to ${hud.matchTarget}`;
+  } else {
+    const won = hud.player.score > hud.bot.score;
+    headline = won ? "You win" : "Opponent wins";
+    scoreLine = `${hud.player.score} – ${hud.bot.score} · first to ${hud.matchTarget}`;
+  }
+  return (
+    <div className="gameover-overlay">
+      <span className="eyebrow">Match over</span>
+      <h2>{headline}</h2>
+      <p>{scoreLine}</p>
+      <div className="gameover-overlay__actions">
+        {lanIsHost ? (
+          <button className="menu__start" onClick={onRematch}>
+            Rematch
+          </button>
+        ) : (
+          <p className="menu__hint">Waiting for the host to rematch…</p>
+        )}
+        <button className="ghost-button" onClick={onMenu}>
+          Menu
+        </button>
+      </div>
     </div>
   );
 }

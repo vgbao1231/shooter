@@ -3,7 +3,7 @@ import type { BotDifficulty, CardId, CardSpec, HudState } from "@inkshot/sim";
 import { GameRuntime, type GameCallbacks, type GameHandle } from "../game/GameRuntime";
 
 interface GameCanvasProps {
-  mode: "training" | "gauntlet" | "match";
+  mode: "training" | "gauntlet";
   arenaId: string;
   botCount?: number;
   botDifficulty?: BotDifficulty;

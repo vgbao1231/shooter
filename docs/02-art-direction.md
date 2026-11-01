@@ -13,7 +13,7 @@ The arena is quiet and geometric. Fighters are colorful and expressive. Guns are
 
 Preserve from the demo:
 
-- 1280×720 side view and mirrored map.
+- 1600×720 side view; arenas are distinct layouts (not mirrored).
 - Round body, two large eyes, readable mouth.
 - Noodle arms/legs with springy motion.
 - Eyes following aim; squash/stretch on jump/land.
@@ -32,7 +32,7 @@ Preserve from the demo:
 - **Weapon:** front hand, rotates to aim, flips when facing left.
 - **Hit:** white flash, squash, damage number, knockback.
 - **Death:** flatten/roll, X eyes, ink splat; no gore.
-- **Size:** 170–200 px tall at 1280×720; tune in Phase 1.
+- **Size:** 170–200 px tall at 1600×720; tune in Phase 1.
 
 Four player colors, each with a badge:
 
