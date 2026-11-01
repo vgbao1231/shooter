@@ -1,0 +1,26 @@
+{
+  "name": "inkshot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "pnpm --filter @inkshot/web dev",
+    "build": "pnpm --filter @inkshot/web build",
+    "preview": "pnpm --filter @inkshot/web preview",
+    "host": "pnpm build && pnpm --filter @inkshot/server start",
+    "test": "pnpm --filter @inkshot/sim test",
+    "typecheck": "pnpm -r typecheck",
+    "check:e2e": "node scripts/e2e-check.mjs",
+    "check:e2e:lan": "node scripts/e2e-lan.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "playwright": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
