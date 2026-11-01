@@ -1,7 +1,7 @@
 # 01 — Game Design
 
-> **Status:** Phase 2 local match flow implemented (Training + Bot Gauntlet + Match). LAN, teams, and per-round card picks remain later phases.
-> **Scope:** 2–4 player LAN shooter, two-arena pool, one life per round, bots, optional 1v1 cards. Phase 2 delivers the match flow for 1 human vs 1–3 bots; multi-human modes need LAN (Phase 3).
+> **Status:** Phase 3 LAN implemented (2–4 browsers on one LAN complete an authoritative match via the host). Teams/FFA mode pick and per-round card picks remain later phases.
+> **Scope:** 2–4 player LAN shooter, two-arena pool, one life per round, bots, optional 1v1 cards. Phase 3 delivers LAN (multi-human + bots) for a shared first-to-N match; teams and the card layer are Phase 4+.
 
 ---
 
