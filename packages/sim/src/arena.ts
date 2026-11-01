@@ -128,8 +128,9 @@ const PG_CENTER: Platform[] = [
 ];
 
 const PG_LEFT: Platform[] = [
-  { x: 330, y: 520, w: 100, h: 24, kind: "block" }, // slope step low (top 520, above the beam lane)
-  { x: 450, y: 470, w: 110, h: 24, kind: "block" }, // slope step high (top 470)
+  { x: 230, y: 560, w: 90, h: 22, kind: "block" }, // slope step low (top 560, above the beam lane)
+  { x: 330, y: 520, w: 100, h: 22, kind: "block" }, // slope step mid (top 520)
+  { x: 450, y: 470, w: 110, h: 22, kind: "block" }, // slope step high (top 470)
   { x: 30, y: 260, w: 64, h: 428, kind: "block" }, // tower column (bottom 688)
   { x: 30, y: 190, w: 30, h: 70, kind: "block" }, // tower prong L
   { x: 64, y: 190, w: 30, h: 70, kind: "block" }, // tower prong R
@@ -182,20 +183,23 @@ const SKY_FLOOR: Platform[] = [
   { x: 900, y: 688, w: 680, h: 32, kind: "block" }, // right floor 900-1580
 ]; // central pit: x700-900 (narrower than before)
 
-// Central crane tower: a tall mast with a fixed top plate, a rope-hung platform
-// that swings (see `swing.ts`), and two lower beams. Sits in the central pit so
-// players must cross on the hanging platform or the side scaffolds.
+// Central crane tower: a tall mast with a fixed top plate (with a collar), a
+// rope-hung platform that swings (see `swing.ts`), and two lower beams. Sits in
+// the central pit so players must cross on the hanging platform or the side
+// scaffolds.
 const SKY_CENTER: Platform[] = [
   { x: 786, y: 200, w: 28, h: 488, kind: "pillar" }, // mast (top 200, bottom 688)
   { x: 750, y: 180, w: 100, h: 26, kind: "block" }, // top plate (top 180)
+  { x: 768, y: 206, w: 64, h: 18, kind: "block" }, // collar below the top plate
   { x: 740, y: 420, w: 120, h: 26, kind: "block" }, // mid beam (top 420)
   { x: 740, y: 560, w: 120, h: 26, kind: "block" }, // lower beam (top 560)
 ];
 
 const SKY_SIDE: Platform[] = [
   { x: 60, y: 280, w: 130, h: 26, kind: "block" }, // top platform (top 280)
+  { x: 62, y: 234, w: 28, h: 46, kind: "pillar" }, // top platform post L (backdrop)
+  { x: 160, y: 234, w: 28, h: 46, kind: "pillar" }, // top platform post R (backdrop)
   { x: 110, y: 306, w: 26, h: 382, kind: "pillar" }, // tall post (bottom 688)
-  { x: 150, y: 340, w: 30, h: 26, kind: "block" }, // post bump
   { x: 60, y: 440, w: 380, h: 26, kind: "block" }, // long mid beam (top 440)
   { x: 390, y: 466, w: 24, h: 90, kind: "pillar" }, // post under mid beam
   { x: 80, y: 570, w: 340, h: 26, kind: "block" }, // long low beam (top 570)
