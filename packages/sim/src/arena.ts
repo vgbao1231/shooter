@@ -99,38 +99,46 @@ const PG_PALETTE: ArenaPalette = {
 };
 
 const PG_FLOOR: Platform[] = [
-  { x: 20, y: 688, w: 520, h: 32, kind: "block" }, // left floor 20-540
-  { x: 600, y: 688, w: 400, h: 32, kind: "block" }, // center floor 600-1000
-  { x: 1060, y: 688, w: 520, h: 32, kind: "block" }, // right floor 1060-1580
-]; // pits: x540-600 and x1000-1060
+  { x: 20, y: 688, w: 500, h: 32, kind: "block" }, // left floor 20-520
+  { x: 1080, y: 688, w: 500, h: 32, kind: "block" }, // right floor 1080-1580
+]; // one BIG central pit: x520-1080 (the pyramid sits in it, per the reference)
 
 // A long continuous walkway in front of the pyramid (the reference map's wide
-// beam near the bottom). It reads as a thin bridge; the pits behind still catch
-// a careless step off its ends.
+// beam near the bottom). It reads as a thin bridge crossing the pit safely; the
+// pit still catches a careless step off its ends or a drop behind it.
 const PG_BEAM: Platform[] = [
   { x: 140, y: 600, w: 1320, h: 20, kind: "block" },
 ];
 
-// Solid stepped pyramid: a dark body with tan walkable tier tops and a
-// crenellated crown, matching the reference map's dominant central mass. The
-// body sits within the centre floor (600-1000) so the flanking pits stay clear.
+// Big stepped ziggurat pyramid (the reference's dominant central mass). The
+// dark body is a `pillar` backdrop; each tier top is a collidable `block` walk
+// inset toward the centre, so from the side it reads as a staircase. Tiers are
+// spaced ~92px vertically (well within a 185px jump) and never crowd a lane.
 const PG_CENTER: Platform[] = [
-  { x: 620, y: 460, w: 360, h: 228, kind: "pillar" }, // body base (460-688)
-  { x: 680, y: 340, w: 240, h: 120, kind: "pillar" }, // body mid (340-460)
-  { x: 720, y: 240, w: 160, h: 100, kind: "pillar" }, // body upper (240-340)
-  { x: 620, y: 438, w: 360, h: 22, kind: "block" }, // tier 1 walk (top 438)
-  { x: 680, y: 318, w: 240, h: 22, kind: "block" }, // tier 2 walk (top 318)
-  { x: 720, y: 218, w: 160, h: 22, kind: "block" }, // tier 3 walk (top 218)
-  { x: 730, y: 150, w: 140, h: 24, kind: "block" }, // crown base (top 150)
-  { x: 736, y: 92, w: 44, h: 42, kind: "block" }, // crown tooth left
-  { x: 820, y: 92, w: 44, h: 42, kind: "block" }, // crown tooth right
-  { x: 736, y: 134, w: 128, h: 16, kind: "block" }, // crown connector
+  // Dark body (visual-only; the pit below stays a deadly drop). Extends down to
+  // the floor line so the pyramid reads as rising out of the pit behind the beam.
+  { x: 560, y: 440, w: 480, h: 248, kind: "pillar" }, // body base (440-688)
+  { x: 620, y: 348, w: 360, h: 92, kind: "pillar" }, // body mid (348-440)
+  { x: 680, y: 256, w: 240, h: 92, kind: "pillar" }, // body upper (256-348)
+  { x: 720, y: 164, w: 160, h: 92, kind: "pillar" }, // body top (164-256)
+  // Tier walks (collidable). Wide base inset toward the centre, well-spaced.
+  { x: 560, y: 440, w: 480, h: 22, kind: "block" }, // tier 1 walk (top 440)
+  { x: 620, y: 348, w: 360, h: 22, kind: "block" }, // tier 2 walk (top 348)
+  { x: 680, y: 256, w: 240, h: 22, kind: "block" }, // tier 3 walk (top 256)
+  { x: 720, y: 164, w: 160, h: 22, kind: "block" }, // tier 4 walk (top 164)
+  // Crown (castle peak with a notch) — high, clear of tier 4 by 42px.
+  { x: 730, y: 88, w: 140, h: 24, kind: "block" }, // crown base (top 88)
+  { x: 736, y: 32, w: 44, h: 40, kind: "block" }, // crown tooth left
+  { x: 820, y: 32, w: 44, h: 40, kind: "block" }, // crown tooth right
+  { x: 736, y: 74, w: 128, h: 16, kind: "block" }, // crown connector
 ];
 
 const PG_LEFT: Platform[] = [
-  { x: 230, y: 560, w: 90, h: 22, kind: "block" }, // slope step low (top 560, above the beam lane)
-  { x: 330, y: 520, w: 100, h: 22, kind: "block" }, // slope step mid (top 520)
-  { x: 450, y: 470, w: 110, h: 22, kind: "block" }, // slope step high (top 470)
+  // A lone pit column between the tower and the pyramid, well-separated from
+  // both (256px from the tower, 140px from the pyramid) so it never wedges a
+  // player — it's a mid-pit hop platform, matching the reference's spaced blocks.
+  { x: 350, y: 498, w: 70, h: 22, kind: "block" }, // column cap (top 498)
+  { x: 360, y: 520, w: 50, h: 168, kind: "pillar" }, // column body (520-688)
   { x: 30, y: 260, w: 64, h: 428, kind: "block" }, // tower column (bottom 688)
   { x: 30, y: 190, w: 30, h: 70, kind: "block" }, // tower prong L
   { x: 64, y: 190, w: 30, h: 70, kind: "block" }, // tower prong R
@@ -152,13 +160,13 @@ export const PROVING_GROUNDS: ArenaDefinition = {
   ],
   palette: PG_PALETTE,
   spawns: {
-    player: { x: 260, y: 584 },
+    player: { x: 260, y: 584 }, // on the beam (top 600), clear of the column cap (350-420)
     bot: { x: 1340, y: 584 },
     bots: [
       { x: 1340, y: 584 },
-      { x: 800, y: 202 }, // on tier 3 (top 218)
-      { x: 520, y: 584 },
-      { x: 1080, y: 584 },
+      { x: 800, y: 148 }, // on tier 4 (top 164)
+      { x: 460, y: 584 }, // on the beam, clear of the column cap (350-420)
+      { x: 1160, y: 584 }, // on the beam, clear of the mirrored column cap (1180-1250)
     ],
   },
 };
