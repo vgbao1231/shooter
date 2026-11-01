@@ -332,11 +332,22 @@ export function startGauntletWave(world: World, wave: number): void {
 /** Start the next round of a match: respawn everyone, keep scores. */
 export function startMatchRound(world: World): void {
   const arena = getArena(world.arenaId);
-  const player = world.players.find((entry) => !entry.isBot);
+  const allSpawns = [
+    arena.spawns.player,
+    arena.spawns.bot,
+    ...arena.spawns.bots,
+  ];
+  const humans = world.players.filter((entry) => !entry.isBot);
   const bots = world.players.filter((entry) => entry.isBot);
-  if (player) resetPlayer(player, arena.spawns.player, false);
+  // Every human (not just the first) must be respawned: a LAN match can have
+  // 2–4 humans, and leaving a later one dead makes the next round instantly
+  // end as a loss for them (the auto-loss bug after a loser card pick).
+  humans.forEach((human, index) => {
+    resetPlayer(human, allSpawns[index] ?? arena.spawns.player, false);
+  });
   bots.forEach((bot, index) => {
-    resetPlayer(bot, arena.spawns.bots[index] ?? arena.spawns.bot, true);
+    const spawn = allSpawns[humans.length + index] ?? arena.spawns.bot;
+    resetPlayer(bot, spawn, true);
     world.bots.set(bot.id, createBotBrain());
   });
   world.bullets = [];

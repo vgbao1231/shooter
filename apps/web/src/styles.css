@@ -1047,11 +1047,49 @@ button {
   gap: 2px;
 }
 
+.lobby__room-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .lobby__room-link code {
   font-size: 13px;
   color: #cfe6ef;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.lobby__copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(57, 208, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(57, 208, 255, 0.1);
+  color: #7fe0ff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.lobby__copy:hover {
+  background: rgba(57, 208, 255, 0.2);
+}
+
+.lobby__copy:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lobby__copy-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b8f4d0;
   white-space: nowrap;
 }
 
