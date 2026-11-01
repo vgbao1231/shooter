@@ -2,8 +2,13 @@ export const TICK_RATE = 60;
 export const FIXED_DT = 1 / TICK_RATE;
 
 export const GRAVITY = 1900;
-export const GROUND_ACCEL = 24;
-export const AIR_ACCEL = 9;
+export const GROUND_ACCEL = 34;
+export const AIR_ACCEL = 16;
+/** Deceleration applied when there's no horizontal input, so the character
+ *  stops crisply instead of sliding on momentum (that inertia was the "hard
+ *  to control" complaint). Higher than the matching accel. */
+export const GROUND_FRICTION = 44;
+export const AIR_FRICTION = 24;
 export const MOVE_SPEED = 320;
 export const JUMP_SPEED = 840;
 export const WALL_JUMP_SPEED_X = 440;

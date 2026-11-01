@@ -1,10 +1,12 @@
 import {
   AIR_ACCEL,
+  AIR_FRICTION,
   CLIMB_STAMINA_DRAIN,
   CLIMB_STAMINA_MAX,
   CLIMB_STAMINA_REGEN,
   GRAVITY,
   GROUND_ACCEL,
+  GROUND_FRICTION,
   JUMP_SPEED,
   MOVE_SPEED,
   WALL_CLIMB_SPEED,
@@ -29,7 +31,11 @@ export function movePlayer(
   const wallJumpY = WALL_JUMP_SPEED_Y * (player.cards.includes("SPRING") ? 1.12 : 1);
   const climbSpeed = WALL_CLIMB_SPEED * (player.cards.includes("SPRING") ? 1.25 : 1);
   const targetSpeed = move * moveSpeed;
-  const accel = player.grounded ? GROUND_ACCEL : AIR_ACCEL;
+  // Accelerate toward the input direction; when there's no input, use the
+  // stronger friction so the character brakes to a stop instead of sliding.
+  const accel = move === 0
+    ? (player.grounded ? GROUND_FRICTION : AIR_FRICTION)
+    : (player.grounded ? GROUND_ACCEL : AIR_ACCEL);
   player.vx += (targetSpeed - player.vx) * Math.min(1, accel * dt);
 
   player.wallClimbing = false;
