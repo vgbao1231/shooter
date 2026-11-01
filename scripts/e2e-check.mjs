@@ -36,17 +36,17 @@ await page.evaluate(() => {
   world.botEnabled = false;
   const bot = world.players[1];
   const player = world.players[0];
-  player.x = 1150;
-  player.y = 672;
+  player.x = 800;
+  player.y = 594;
   player.vx = 0;
   player.vy = 0;
-  bot.x = 1400;
-  bot.y = 672;
+  bot.x = 1000;
+  bot.y = 594;
   bot.vx = 0;
   bot.vy = 0;
 });
 await page.locator("canvas").click();
-await page.mouse.move(point(1400, 672).x, point(1400, 672).y);
+await page.mouse.move(point(1000, 594).x, point(1000, 594).y);
 await page.mouse.down();
 const samples = [];
 for (let index = 0; index < 12; index += 1) {

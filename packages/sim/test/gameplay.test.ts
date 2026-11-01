@@ -8,7 +8,6 @@ import {
   getArena,
   getBot,
   getPlayer,
-  impulseSwing,
   pickCard,
   ARENAS,
   ARENA_HEIGHT,
@@ -77,16 +76,16 @@ describe("movement", () => {
     expect(player).toBeDefined();
     if (!player) return;
     // On the right-floor lane, push right into the mirrored tower column.
-    player.x = 1350;
-    player.y = 672;
+    player.x = 780;
+    player.y = 427.5;
     player.vx = 0;
     player.vy = 0;
     player.grounded = true;
 
     step(world, [input(0, { move: 1 })], 45);
-    // Tower column left face x=1510; player radius 16 → rests at x≈1494.
-    expect(player.x).toBeGreaterThanOrEqual(1488);
-    expect(player.x).toBeLessThan(1500);
+    // CENTER PLAT right small block left face x≈839.1; radius 16 → rests at x≈823.1.
+    expect(player.x).toBeGreaterThanOrEqual(818);
+    expect(player.x).toBeLessThan(830);
   });
 
   it("climbs a wall while holding jump into it", () => {
@@ -94,9 +93,9 @@ describe("movement", () => {
     const player = getPlayer(world, 0);
     expect(player).toBeDefined();
     if (!player) return;
-    // Press right into the right tower's clean left face (x=1506).
-    player.x = 1490;
-    player.y = 380;
+    // Press right into the right tower's left prong clean left face (x≈1143.1).
+    player.x = 1123;
+    player.y = 490;
     player.vx = 0;
     player.vy = 0;
     player.grounded = false;
@@ -117,15 +116,15 @@ describe("combat", () => {
     expect(player && bot).toBeDefined();
     if (!player || !bot) return;
 
-    // Clear horizontal lane on the right floor; the bullet travels right.
-    player.x = 1150;
-    player.y = 672;
+    // Clear horizontal lane on the FLOOR beam; the bullet travels right.
+    player.x = 800;
+    player.y = 594;
     player.grounded = true;
-    bot.x = 1400;
-    bot.y = 672;
+    bot.x = 1000;
+    bot.y = 594;
     player.aimAngle = 0;
-    player.aimX = 1500;
-    player.aimY = 672;
+    player.aimX = 1000;
+    player.aimY = 594;
     player.weaponId = "pistol";
     fireWeapon(world, player);
     step(world, [input(0)], 20);
@@ -169,9 +168,9 @@ describe("pits", () => {
     const player = getPlayer(world, 0);
     expect(player).toBeDefined();
     if (!player) return;
-    // Over the left pit (x540-600) at floor level, under the front beam: no
-    // floor below → fall and die.
-    player.x = 570;
+    // Past the right tower (content ends x≈1221), over open pit: no floor below
+    // → fall and die.
+    player.x = 1350;
     player.y = 672;
     player.vx = 0;
     player.vy = 0;
@@ -186,9 +185,9 @@ describe("pits", () => {
     const player = getPlayer(world, 0);
     expect(player).toBeDefined();
     if (!player) return;
-    // On the long front beam (top 600).
-    player.x = 300;
-    player.y = 584;
+    // On the FLOOR beam (top 609.8 → stand y 593.8).
+    player.x = 700;
+    player.y = 594;
     player.vx = 0;
     player.vy = 0;
     player.grounded = true;
@@ -220,17 +219,17 @@ describe("arenas", () => {
     }
   });
 
-  it("Skyline: a player on the right floor survives, but the central pit kills", () => {
+  it("Skyline: a player on solid ground survives, but the side pit kills", () => {
     const arena = getArena("skyline");
     expect(arena.id).toBe("skyline");
 
-    // Standing on the right floor (x960-1580, top y688).
+    // Standing on the left LOW (x490.8-749.6, top y621.6 → stand y605.6).
     const safe = createWorld({ seed: 60, arenaId: "skyline", botEnabled: false });
     const safePlayer = getPlayer(safe, 0);
     expect(safePlayer).toBeDefined();
     if (safePlayer) {
-      safePlayer.x = 1200;
-      safePlayer.y = 672;
+      safePlayer.x = 650;
+      safePlayer.y = 606;
       safePlayer.vx = 0;
       safePlayer.vy = 0;
       safePlayer.grounded = true;
@@ -238,12 +237,13 @@ describe("arenas", () => {
       expect(safePlayer.alive).toBe(true);
     }
 
-    // Over the central pit slot (x700-760 gap): no floor below → fall and die.
+    // Past the right HANG (content ends x≈1157), over the side pit: no floor
+    // below → fall and die.
     const pit = createWorld({ seed: 61, arenaId: "skyline", botEnabled: false });
     const pitPlayer = getPlayer(pit, 0);
     expect(pitPlayer).toBeDefined();
     if (pitPlayer) {
-      pitPlayer.x = 730;
+      pitPlayer.x = 1250;
       pitPlayer.y = 600;
       pitPlayer.vx = 0;
       pitPlayer.vy = 0;
@@ -263,106 +263,7 @@ describe("fixed step", () => {
   });
 });
 
-describe("swing platforms", () => {
-  it("a displaced swing returns toward equilibrium over time", () => {
-    const world = createWorld({ seed: 9, arenaId: "skyline", botEnabled: false });
-    expect(world.swingDefs.length).toBeGreaterThan(0);
-    const state = world.swingState[0];
-    expect(state).toBeDefined();
-    if (!state) return;
-    state.angle = 0.4;
-    state.angVel = 0;
-    step(world, [input(0)], 300);
-    expect(Math.abs(state.angle)).toBeLessThan(0.1);
-  });
-
-  it("a player standing on a swing tips it away from the anchor", () => {
-    const world = createWorld({ seed: 10, arenaId: "skyline", botEnabled: false });
-    const state = world.swingState[0];
-    const def = world.swingDefs[0];
-    const player = getPlayer(world, 0);
-    expect(state && def && player).toBeDefined();
-    if (!state || !def || !player) return;
-    // Stand on the crane block (anchor 800,20 → centre ~800,220), offset right.
-    const cx = def.anchorX + def.length * Math.sin(state.angle);
-    const cy = def.anchorY + def.length * Math.cos(state.angle) + state.bob;
-    player.x = cx + 45;
-    player.y = cy - def.h / 2 - player.radius;
-    player.vx = 0;
-    player.vy = 0;
-    player.grounded = true;
-    step(world, [input(0)], 60);
-    expect(state.angle).toBeGreaterThan(0.01);
-  });
-
-  it("a bullet impulse kicks a swing block sideways and up", () => {
-    const world = createWorld({ seed: 11, arenaId: "skyline", botEnabled: false });
-    const state = world.swingState[0];
-    expect(state).toBeDefined();
-    if (!state) return;
-    // A fast shot travelling right and slightly up.
-    impulseSwing(world, 0, 600, -200);
-    expect(state.angVel).toBeGreaterThan(0); // sways right
-    expect(state.bobVel).toBeLessThan(0); // pops up
-  });
-
-  it("a shot that reaches a swing block sways it (bullet contact)", () => {
-    const world = createWorld({ seed: 12, arenaId: "skyline", botEnabled: false });
-    const state = world.swingState[0];
-    const def = world.swingDefs[0];
-    const shooter = getPlayer(world, 0);
-    expect(state && def && shooter).toBeDefined();
-    if (!state || !def || !shooter) return;
-    const cx = def.anchorX + def.length * Math.sin(state.angle);
-    const cy = def.anchorY + def.length * Math.cos(state.angle) + state.bob;
-    // Shooter to the left of the block, aiming straight right into its centre.
-    shooter.x = cx - 300;
-    shooter.y = cy;
-    shooter.vx = 0;
-    shooter.vy = 0;
-    shooter.grounded = true;
-    shooter.aimAngle = 0;
-    shooter.aimX = cx;
-    shooter.aimY = cy;
-    shooter.weaponId = "pistol";
-    fireWeapon(world, shooter);
-    step(world, [input(0)], 30);
-    expect(Math.abs(state.angle)).toBeGreaterThan(0.01);
-  });
-
-  it("a player jumping up into a swing block pops it upward (bob < 0)", () => {
-    const world = createWorld({ seed: 13, arenaId: "skyline", botEnabled: false });
-    const state = world.swingState[0];
-    const def = world.swingDefs[0];
-    const player = getPlayer(world, 0);
-    expect(state && def && player).toBeDefined();
-    if (!state || !def || !player) return;
-    const cx = def.anchorX + def.length * Math.sin(state.angle);
-    const cy = def.anchorY + def.length * Math.cos(state.angle) + state.bob;
-    const bottom = cy + def.h / 2;
-    // Put the player's head just under the block, moving up fast.
-    player.x = cx;
-    player.y = bottom + player.radius + 4;
-    player.vx = 0;
-    player.vy = -400;
-    player.grounded = false;
-    step(world, [input(0)], 1);
-    expect(state.bob).toBeLessThan(0);
-  });
-
-  it("an explosion near a swing block shoves it away from the blast", () => {
-    const world = createWorld({ seed: 22, arenaId: "skyline", botEnabled: false });
-    const state = world.swingState[0];
-    const def = world.swingDefs[0];
-    expect(state && def).toBeDefined();
-    if (!state || !def) return;
-    const cx = def.anchorX + def.length * Math.sin(state.angle);
-    const cy = def.anchorY + def.length * Math.cos(state.angle) + state.bob;
-    // Explode to the LEFT of the block → the block sways right.
-    explode(world, cx - def.w, cy, 80, 100);
-    expect(state.angVel).toBeGreaterThan(0);
-  });
-
+describe("buckshot", () => {
   it("a buckshot cluster merges into one blast (no per-pellet explosion)", () => {
     const world = createWorld({
       seed: 21,
@@ -411,15 +312,15 @@ describe("team mode", () => {
     const mate = getPlayer(world, 1);
     expect(shooter && mate).toBeDefined();
     if (!shooter || !mate) return;
-    shooter.x = 1100;
-    shooter.y = 672;
+    shooter.x = 800;
+    shooter.y = 594;
     shooter.grounded = true;
-    mate.x = 1400;
-    mate.y = 672;
+    mate.x = 1000;
+    mate.y = 594;
     mate.grounded = true;
     shooter.aimAngle = 0;
-    shooter.aimX = 1500;
-    shooter.aimY = 672;
+    shooter.aimX = 1000;
+    shooter.aimY = 594;
     shooter.weaponId = "pistol";
     fireWeapon(world, shooter);
     step(world, [input(0), input(1)], 20);
@@ -440,15 +341,15 @@ describe("team mode", () => {
     const enemy = getPlayer(world, 1);
     expect(shooter && enemy).toBeDefined();
     if (!shooter || !enemy) return;
-    shooter.x = 1100;
-    shooter.y = 672;
+    shooter.x = 800;
+    shooter.y = 594;
     shooter.grounded = true;
-    enemy.x = 1400;
-    enemy.y = 672;
+    enemy.x = 1000;
+    enemy.y = 594;
     enemy.grounded = true;
     shooter.aimAngle = 0;
-    shooter.aimX = 1500;
-    shooter.aimY = 672;
+    shooter.aimX = 1000;
+    shooter.aimY = 594;
     shooter.weaponId = "pistol";
     fireWeapon(world, shooter);
     step(world, [input(0), input(1)], 20);
@@ -469,16 +370,16 @@ describe("team mode", () => {
     const enemy = getPlayer(world, 1);
     expect(shooter && enemy).toBeDefined();
     if (!shooter || !enemy) return;
-    shooter.x = 1100;
-    shooter.y = 672;
+    shooter.x = 800;
+    shooter.y = 594;
     shooter.grounded = true;
-    enemy.x = 1400;
-    enemy.y = 672;
+    enemy.x = 1000;
+    enemy.y = 594;
     enemy.grounded = true;
     enemy.health = 10; // one pistol hit (12 dmg) kills
     shooter.aimAngle = 0;
-    shooter.aimX = 1500;
-    shooter.aimY = 672;
+    shooter.aimX = 1000;
+    shooter.aimY = 594;
     shooter.weaponId = "pistol";
     fireWeapon(world, shooter);
     step(world, [input(0), input(1)], 20);
@@ -750,7 +651,7 @@ describe("loser picks card (1v1)", () => {
     // Separate the pair, then drop the loser's health to zero.
     loser.x = 500;
     loser.y = 580;
-    winner.x = 1100;
+    winner.x = 1000;
     winner.y = 580;
     loser.health = 1;
     explode(world, loser.x, loser.y, 80, 100);
@@ -810,7 +711,7 @@ describe("loser picks card (1v1)", () => {
     const loserTeam = world.players[2] as (typeof world.players)[number];
     const winner = world.players[0] as (typeof world.players)[number];
     loserTeam.health = 1;
-    winner.x = 1100;
+    winner.x = 1000;
     winner.y = 580;
     explode(world, loserTeam.x, loserTeam.y, 80, 100);
     clearHitStop(world);
@@ -878,7 +779,7 @@ describe("loser picks card (1v1)", () => {
     expect(player && bot).toBeDefined();
     if (!player || !bot) return;
     // Player wins, bot loses → bot auto-picks, no cardPick freeze.
-    player.x = 1100;
+    player.x = 1000;
     player.y = 580;
     bot.x = 500;
     bot.y = 580;

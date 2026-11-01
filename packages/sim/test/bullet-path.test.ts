@@ -16,17 +16,17 @@ describe("bullet path in browser setup", () => {
     expect(player && bot).toBeDefined();
     if (!player || !bot) return;
 
-    // Clear horizontal lane on the right floor; the bullet travels right.
-    player.x = 1150;
-    player.y = 672;
+    // Clear horizontal lane on the FLOOR beam; the bullet travels right.
+    player.x = 800;
+    player.y = 594;
     player.vx = 0;
     player.vy = 0;
     player.grounded = true;
     player.aimAngle = 0;
-    player.aimX = 1500;
-    player.aimY = 672;
-    bot.x = 1400;
-    bot.y = 672;
+    player.aimX = 1000;
+    player.aimY = 594;
+    bot.x = 1000;
+    bot.y = 594;
     bot.vx = 0;
     bot.vy = 0;
 
@@ -38,8 +38,8 @@ describe("bullet path in browser setup", () => {
       jumpHeld: false,
       shootHeld: false,
       grenadeHeld: false,
-      aimX: 1500,
-      aimY: 672,
+      aimX: 1000,
+      aimY: 594,
     };
     const xs: number[] = [];
     for (let tick = 0; tick < 80; tick += 1) {
